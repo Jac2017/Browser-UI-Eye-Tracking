@@ -77,6 +77,24 @@ $('#tab-selector').addEventListener('change', async (e) => {
   }
 
   if (currentData) {
+    // Try fetching full analytics (with AOI) from the content script if tab is still open
+    try {
+      const numTabId = parseInt(tabId);
+      if (numTabId) {
+        const analytics = await chrome.tabs.sendMessage(numTabId, { type: 'GET_ANALYTICS' });
+        if (analytics) {
+          if (analytics.fixations?.length > 0) fixations = analytics.fixations;
+          if (analytics.scanpath) scanpath = analytics.scanpath;
+          if (analytics.aois?.length > 0) aoiResults = analytics.aois;
+          if (analytics.engagement) engagement = analytics.engagement;
+          renderAll();
+          return;
+        }
+      }
+    } catch (e) {
+      // Tab not open or content script not loaded — fall back to local analysis
+    }
+
     // Defer heavy analysis to next frame to avoid blocking UI
     requestAnimationFrame(() => {
       analyzeData();
@@ -275,6 +293,7 @@ function renderAll() {
   renderEngagement();
   renderOverview();
   renderScanpath();
+  renderAOI();
   renderTimeline();
   checkVideoData();
 }
@@ -478,6 +497,68 @@ function renderScanpath() {
       <td>${elapsed}s</td>
     </tr>`;
   }).join('');
+}
+
+function renderAOI() {
+  const listEl = $('#aoi-list');
+  const chartCanvas = $('#aoi-chart');
+
+  if (!aoiResults || aoiResults.length === 0) {
+    listEl.innerHTML = '<p class="empty-state">No AOI data — open the tracked tab and select it to get AOI analysis</p>';
+    return;
+  }
+
+  // Render AOI list sorted by total dwell time
+  const sorted = [...aoiResults].sort((a, b) => (b.totalDwellTime || 0) - (a.totalDwellTime || 0));
+  listEl.innerHTML = sorted.map((aoi, i) => `
+    <div class="item-row">
+      <span class="item-rank">${i + 1}</span>
+      <div class="item-info">
+        <div class="item-name">${escapeHtml(aoi.label || aoi.category || 'Unknown')}</div>
+        <div class="item-detail">${aoi.fixationCount || 0} fixations · ${((aoi.totalDwellTime || 0) / 1000).toFixed(1)}s dwell · ${aoi.revisits || 0} revisits</div>
+      </div>
+    </div>
+  `).join('');
+
+  // Render AOI chart (horizontal bar chart)
+  if (!chartCanvas) return;
+  const ctx = chartCanvas.getContext('2d');
+  chartCanvas.width = chartCanvas.clientWidth * 2;
+  chartCanvas.height = 400;
+  ctx.scale(2, 2);
+
+  const w = chartCanvas.clientWidth;
+  const h = 200;
+  ctx.clearRect(0, 0, w, h);
+
+  const maxDwell = Math.max(...sorted.map(a => a.totalDwellTime || 0), 1);
+  const barH = Math.min(24, (h - 20) / sorted.length);
+  const margin = { left: 100, right: 20 };
+  const plotW = w - margin.left - margin.right;
+
+  for (let i = 0; i < Math.min(sorted.length, 8); i++) {
+    const aoi = sorted[i];
+    const barW = ((aoi.totalDwellTime || 0) / maxDwell) * plotW;
+    const y = 10 + i * (barH + 4);
+
+    ctx.fillStyle = '#58a6ff';
+    ctx.fillRect(margin.left, y, barW, barH);
+
+    // Label
+    ctx.fillStyle = '#e6edf3';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const label = (aoi.category || 'Unknown').substring(0, 14);
+    ctx.fillText(label, margin.left - 6, y + barH / 2);
+
+    // Value
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#8b949e';
+    ctx.fillText(`${((aoi.totalDwellTime || 0) / 1000).toFixed(1)}s`, margin.left + barW + 4, y + barH / 2);
+  }
+  ctx.textAlign = 'start';
+  ctx.textBaseline = 'alphabetic';
 }
 
 function renderTimeline() {
