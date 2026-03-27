@@ -22,8 +22,8 @@ const state = {
   calibrationIndex: 0,
   autoCollectInterval: null,
   autoMoveHandler: null,
-  autoTouchHandler: null,
   trackingInterval: null,
+  predicting: false,
 };
 
 const EYE_CANVAS_W = 55;
@@ -592,18 +592,23 @@ function startTracking() {
   $('#btn-stop-tracking').style.display = '';
   setStatusText('Tracking active — gaze data streaming');
 
-  state.trackingInterval = setInterval(() => {
-    if (!state.tracking || !state.faceDetected) return;
+  state.trackingInterval = setInterval(async () => {
+    if (!state.tracking || !state.faceDetected || state.predicting) return;
 
-    const pred = getPrediction();
-    if (pred) {
-      chrome.runtime.sendMessage({
-        type: 'GAZE_DATA',
-        x: pred.x,
-        y: pred.y,
-        timestamp: Date.now(),
-        confidence: 1,
-      }).catch(() => {});
+    state.predicting = true;
+    try {
+      const pred = getPrediction();
+      if (pred) {
+        chrome.runtime.sendMessage({
+          type: 'GAZE_DATA',
+          x: pred.x,
+          y: pred.y,
+          timestamp: Date.now(),
+          confidence: 1,
+        }).catch(() => {});
+      }
+    } finally {
+      state.predicting = false;
     }
   }, 50);
 

@@ -15,6 +15,61 @@ const sessionData = new Map();
 const FIRST_VIEWED_WINDOW_MS = 5000;
 const pageLoadTimes = new Map();
 
+// Persistence: save critical state to chrome.storage.local so it survives SW restart
+let persistTimer = null;
+const PERSIST_INTERVAL_MS = 10000; // Save every 10s if dirty
+let persistDirty = false;
+
+async function persistState() {
+  if (!persistDirty) return;
+  try {
+    const serializable = {};
+    for (const [tabId, data] of heatmapData) {
+      serializable[tabId] = data;
+    }
+    await chrome.storage.local.set({
+      _eyedHeatmapData: serializable,
+      _eyedSessionData: Object.fromEntries(sessionData),
+      _eyedTrackingActive: trackingActive,
+      _eyedTrackerTabId: trackerTabId,
+      _eyedModelReady: modelReady,
+    });
+    persistDirty = false;
+  } catch (e) {
+    console.warn('EyeD persist error:', e);
+  }
+}
+
+async function restoreState() {
+  try {
+    const stored = await chrome.storage.local.get([
+      '_eyedHeatmapData', '_eyedSessionData',
+      '_eyedTrackingActive', '_eyedTrackerTabId', '_eyedModelReady',
+    ]);
+    if (stored._eyedHeatmapData) {
+      for (const [tabId, data] of Object.entries(stored._eyedHeatmapData)) {
+        heatmapData.set(parseInt(tabId) || tabId, data);
+      }
+    }
+    if (stored._eyedSessionData) {
+      for (const [url, data] of Object.entries(stored._eyedSessionData)) {
+        sessionData.set(url, data);
+      }
+    }
+    if (stored._eyedTrackingActive) trackingActive = stored._eyedTrackingActive;
+    if (stored._eyedTrackerTabId) trackerTabId = stored._eyedTrackerTabId;
+    if (stored._eyedModelReady) modelReady = stored._eyedModelReady;
+  } catch (e) {
+    console.warn('EyeD restore error:', e);
+  }
+}
+
+// Restore on startup
+restoreState();
+
+// Periodic persist
+persistTimer = setInterval(persistState, PERSIST_INTERVAL_MS);
+
 // Rate limiting for broadcasts
 let lastBroadcastTime = 0;
 const BROADCAST_MIN_INTERVAL_MS = 40; // ~25 Hz max broadcast rate
@@ -218,6 +273,7 @@ function handleInputData(msg, tabId) {
     data.mousePoints.push(point);
     trimArray(data.mousePoints, MAX_INPUT_POINTS_PER_TAB);
   }
+  persistDirty = true;
 }
 
 function handleStoreGazePoint(msg, sender) {
@@ -243,6 +299,7 @@ function handleStoreGazePoint(msg, sender) {
   }
 
   if (sender.tab.url) data.url = sender.tab.url;
+  persistDirty = true;
 }
 
 function broadcastToContentScripts(message) {
@@ -274,6 +331,7 @@ function getHeatmapDataForTab(tabId) {
 
 function clearHeatmapData(tabId) {
   if (tabId) heatmapData.delete(tabId);
+  persistDirty = true;
 }
 
 function exportAllData() {
@@ -364,10 +422,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
       trimArray(existing.mousePoints, maxSessionPts);
     }
     sessionData.set(data.url, existing);
+    persistDirty = true;
   }
 
   heatmapData.delete(tabId);
   pageLoadTimes.delete(tabId);
+  persistDirty = true;
 });
 
 /* ========== TRACKER / INSIGHTS TABS ========== */

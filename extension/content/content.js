@@ -71,9 +71,17 @@
   }
 
   function resizeCanvas() {
+    const dpr = window.devicePixelRatio || 1;
     for (const id of ['eyed-heatmap-canvas', 'eyed-scanpath-canvas']) {
       const c = document.getElementById(id);
-      if (c) { c.width = window.innerWidth; c.height = window.innerHeight; }
+      if (c) {
+        c.width = window.innerWidth * dpr;
+        c.height = window.innerHeight * dpr;
+        c.style.width = window.innerWidth + 'px';
+        c.style.height = window.innerHeight + 'px';
+        const ctx = c.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
     }
     state.heatmapDirty = true;
   }
@@ -88,7 +96,7 @@
       pageY: y * viewH + window.scrollY,
       scrollX: window.scrollX,
       scrollY: window.scrollY,
-      timestamp: Date.now(),
+      timestamp: extras.timestamp || Date.now(),
       ...extras,
     };
 
@@ -133,12 +141,12 @@
     if (sy < 0) {
       state.browserUIGaze = true;
       if (browserZone) browserZone.classList.add('gaze-above');
-      state.gazePoints.push(createPoint(sx, sy, { isBrowserUI: true }));
+      state.gazePoints.push(createPoint(sx, sy, { isBrowserUI: true, timestamp }));
     } else {
       state.browserUIGaze = false;
       if (browserZone) browserZone.classList.remove('gaze-above');
 
-      const point = createPoint(sx, sy, { isBrowserUI: false });
+      const point = createPoint(sx, sy, { isBrowserUI: false, timestamp });
       state.gazePoints.push(point);
 
       // Identify element under gaze
@@ -169,10 +177,12 @@
     }).catch(() => {});
 
     state.heatmapDirty = true;
+    state._gazeNonUIDirty = true;
     state.analyticsDirty = true;
 
     if (state.gazePoints.length > 10000) {
       state.gazePoints = state.gazePoints.slice(-5000);
+      state._gazeNonUIDirty = true;
     }
   }
 
@@ -324,35 +334,67 @@
   }
 
   /* ========== HEATMAP RENDERING ========== */
+
+  // Reusable offscreen canvas (avoids creating new one every frame)
+  let offscreenCanvas = null;
+  let offscreenCtx = null;
+
+  function getOffscreen(w, h) {
+    if (!offscreenCanvas || offscreenCanvas.width !== w || offscreenCanvas.height !== h) {
+      offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = w;
+      offscreenCanvas.height = h;
+      offscreenCtx = offscreenCanvas.getContext('2d');
+    }
+    offscreenCtx.clearRect(0, 0, w, h);
+    return offscreenCtx;
+  }
+
+  /** Convert a point's pageX/pageY to current viewport pixel coordinates */
+  function toViewport(point) {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    return {
+      px: point.pageX != null ? point.pageX - window.scrollX : point.x * vw,
+      py: point.pageY != null ? point.pageY - window.scrollY : point.y * vh,
+    };
+  }
+
   function renderHeatmap() {
     const canvas = document.getElementById('eyed-heatmap-canvas');
     if (!canvas || !state.showHeatmap) return;
 
     const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    ctx.clearRect(0, 0, vw, vh);
 
     ctx.globalCompositeOperation = 'source-over';
 
-    drawHeatPoints(ctx, w, h, state.gazePoints.filter(p => !p.isBrowserUI), 20, 'gaze');
-    drawHeatPoints(ctx, w, h, state.mousePoints, 10, 'mouse');
-    drawHeatPoints(ctx, w, h, state.touchPoints, 15, 'touch');
-    drawFirstViewedPoints(ctx, w, h);
-    drawBrowserUIZone(ctx, w, h);
+    // Pre-filter once per frame (avoid re-filtering per draw call)
+    if (!state._gazeNonUI || state._gazeNonUIDirty) {
+      state._gazeNonUI = state.gazePoints.filter(p => !p.isBrowserUI);
+      state._gazeNonUIDirty = false;
+    }
+
+    drawHeatPoints(ctx, vw, vh, state._gazeNonUI, 20, 'gaze');
+    drawHeatPoints(ctx, vw, vh, state.mousePoints, 10, 'mouse');
+    drawHeatPoints(ctx, vw, vh, state.touchPoints, 15, 'touch');
+    drawFirstViewedPoints(ctx, vw, vh);
+    drawBrowserUIZone(ctx, vw, vh);
   }
 
-  function drawHeatPoints(ctx, w, h, points, radius, type) {
+  function drawHeatPoints(ctx, vw, vh, points, radius, type) {
     if (points.length === 0) return;
 
-    const offscreen = document.createElement('canvas');
-    offscreen.width = w;
-    offscreen.height = h;
-    const offCtx = offscreen.getContext('2d');
+    const offCtx = getOffscreen(vw, vh);
 
     for (const point of points) {
-      const px = point.x * w;
-      const py = point.y * h;
+      // Use scroll-adjusted viewport coordinates
+      const { px, py } = toViewport(point);
+
+      // Skip points far off-screen (optimization)
+      if (px < -radius || px > vw + radius || py < -radius || py > vh + radius) continue;
 
       const grad = offCtx.createRadialGradient(px, py, 0, px, py, radius);
       const alpha = type === 'gaze' ? 0.04 : type === 'touch' ? 0.06 : 0.02;
@@ -363,7 +405,7 @@
       offCtx.fillRect(px - radius, py - radius, radius * 2, radius * 2);
     }
 
-    const imageData = offCtx.getImageData(0, 0, w, h);
+    const imageData = offCtx.getImageData(0, 0, vw, vh);
     const pixels = imageData.data;
 
     for (let i = 0; i < pixels.length; i += 4) {
@@ -380,7 +422,7 @@
 
     offCtx.putImageData(imageData, 0, 0);
     ctx.globalCompositeOperation = 'screen';
-    ctx.drawImage(offscreen, 0, 0);
+    ctx.drawImage(offscreenCanvas, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
   }
 
@@ -398,13 +440,12 @@
     const tt = (t - 0.75) * 4; return { r: 255, g: Math.floor((1 - tt) * 255), b: 0 };
   }
 
-  function drawFirstViewedPoints(ctx, w, h) {
+  function drawFirstViewedPoints(ctx, vw, vh) {
     if (state.firstViewedPoints.length === 0) return;
 
     ctx.globalCompositeOperation = 'screen';
     for (const point of state.firstViewedPoints) {
-      const px = point.x * w;
-      const py = point.y * h;
+      const { px, py } = toViewport(point);
       const grad = ctx.createRadialGradient(px, py, 0, px, py, 30);
       grad.addColorStop(0, 'rgba(255, 165, 0, 0.5)');
       grad.addColorStop(0.5, 'rgba(255, 120, 0, 0.2)');
@@ -418,8 +459,7 @@
     ctx.globalCompositeOperation = 'source-over';
     for (let i = 0; i < state.firstViewedPoints.length; i++) {
       const p = state.firstViewedPoints[i];
-      const px = p.x * w;
-      const py = p.y * h;
+      const { px, py } = toViewport(p);
 
       // Numbered orange badge
       ctx.beginPath();
@@ -468,13 +508,13 @@
     if (!canvas || !state.showScanpath) return;
 
     const ctx = canvas.getContext('2d');
-    const w = canvas.width;
-    const h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    ctx.clearRect(0, 0, vw, vh);
 
     // Run fixation detection
     if (state.analyticsDirty && typeof EyedAnalytics !== 'undefined') {
-      state.fixations = EyedAnalytics.detectFixations(state.gazePoints.filter(p => !p.isBrowserUI), w, h);
+      state.fixations = EyedAnalytics.detectFixations(state.gazePoints.filter(p => !p.isBrowserUI), vw, vh);
       state.scanpath = EyedAnalytics.buildScanpath(state.fixations);
       state.analyticsDirty = false;
     }
@@ -482,34 +522,41 @@
     if (!state.scanpath || state.scanpath.fixations.length === 0) return;
 
     const { fixations, saccades } = state.scanpath;
+    const scrollX = window.scrollX;
+    const scrollY = window.scrollY;
 
-    // Saccade lines
+    // Saccade lines (use page coordinates adjusted to viewport)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 4]);
 
     for (const s of saccades) {
+      const fx = (s.fromPageX != null ? s.fromPageX - scrollX : s.fromX * vw);
+      const fy = (s.fromPageY != null ? s.fromPageY - scrollY : s.fromY * vh);
+      const tx = (s.toPageX != null ? s.toPageX - scrollX : s.toX * vw);
+      const ty = (s.toPageY != null ? s.toPageY - scrollY : s.toY * vh);
+
       ctx.beginPath();
-      ctx.moveTo(s.fromX * w, s.fromY * h);
-      ctx.lineTo(s.toX * w, s.toY * h);
+      ctx.moveTo(fx, fy);
+      ctx.lineTo(tx, ty);
       ctx.stroke();
 
       // Arrowhead
-      const angle = Math.atan2(s.toY * h - s.fromY * h, s.toX * w - s.fromX * w);
+      const angle = Math.atan2(ty - fy, tx - fx);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
       ctx.beginPath();
-      ctx.moveTo(s.toX * w, s.toY * h);
-      ctx.lineTo(s.toX * w - 7 * Math.cos(angle - 0.4), s.toY * h - 7 * Math.sin(angle - 0.4));
-      ctx.lineTo(s.toX * w - 7 * Math.cos(angle + 0.4), s.toY * h - 7 * Math.sin(angle + 0.4));
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(tx - 7 * Math.cos(angle - 0.4), ty - 7 * Math.sin(angle - 0.4));
+      ctx.lineTo(tx - 7 * Math.cos(angle + 0.4), ty - 7 * Math.sin(angle + 0.4));
       ctx.closePath();
       ctx.fill();
     }
     ctx.setLineDash([]);
 
-    // Fixation circles (size proportional to duration)
+    // Fixation circles (use page coordinates adjusted to viewport)
     for (const fix of fixations) {
-      const px = fix.cx * w;
-      const py = fix.cy * h;
+      const px = (fix.pageCx != null ? fix.pageCx - scrollX : fix.cx * vw);
+      const py = (fix.pageCy != null ? fix.pageCy - scrollY : fix.cy * vh);
       const r = Math.max(8, Math.min(28, fix.duration / 20));
 
       ctx.beginPath();
@@ -761,6 +808,8 @@
         state.firstViewedElements = [];
         state.fixations = [];
         state.scanpath = null;
+        state._gazeNonUI = null;
+        state._gazeNonUIDirty = true;
         state.heatmapDirty = true;
         state.analyticsDirty = true;
         if (state.showHeatmap) queueRender();

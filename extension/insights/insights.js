@@ -32,7 +32,8 @@ async function loadTabList() {
       for (const tab of result.tabs) {
         const opt = document.createElement('option');
         opt.value = tab.tabId;
-        const title = tab.url ? new URL(tab.url).hostname : `Tab ${tab.tabId}`;
+        let title = `Tab ${tab.tabId}`;
+        try { title = new URL(tab.url).hostname; } catch (e) { /* invalid URL */ }
         opt.textContent = `${title} (${tab.gazeCount} pts)`;
         selector.appendChild(opt);
       }
@@ -47,7 +48,8 @@ async function loadTabList() {
         if (data.gazePoints?.length > 0) {
           const opt = document.createElement('option');
           opt.value = tabId;
-          const title = data.url ? new URL(data.url).hostname : `Tab ${tabId}`;
+          let title = `Tab ${tabId}`;
+          try { title = new URL(data.url).hostname; } catch (e) { /* invalid URL */ }
           opt.textContent = `${title} (${data.gazePoints.length} pts)`;
           opt.dataset.json = JSON.stringify(data);
           selector.appendChild(opt);
