@@ -34,6 +34,9 @@
     fixations: [],
     scanpath: null,
     analyticsDirty: true,
+    // Pre-filtered gaze cache
+    _gazeNonUI: null,
+    _gazeNonUIDirty: true,
   };
 
   /* ========== DOM SETUP ========== */
@@ -176,6 +179,8 @@
       pageY: lastPoint.pageY,
       scrollX: lastPoint.scrollX,
       scrollY: lastPoint.scrollY,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
       timestamp,
       videoTime: lastPoint.videoTime,
       onVideo: lastPoint.onVideo,
@@ -727,15 +732,18 @@
         return true;
 
       case 'CAPTURE_VIEWPORT_SCREENSHOT':
-        handleScreenshotRequest({ ...msg, fullPage: false }, sendResponse);
+        handleScreenshotRequest({ ...msg, fullPage: false }, sendResponse)
+          .catch(e => { try { sendResponse({ error: e.message }); } catch (_) {} });
         return true;
 
       case 'CAPTURE_FULLPAGE_SCREENSHOT':
-        handleScreenshotRequest({ ...msg, fullPage: true }, sendResponse);
+        handleScreenshotRequest({ ...msg, fullPage: true }, sendResponse)
+          .catch(e => { try { sendResponse({ error: e.message }); } catch (_) {} });
         return true;
 
       case 'CAPTURE_HEATMAP_SCREENSHOT':
-        handleScreenshotRequest({ fullPage: false, download: false }, sendResponse);
+        handleScreenshotRequest({ fullPage: false, download: false }, sendResponse)
+          .catch(e => { try { sendResponse({ error: e.message }); } catch (_) {} });
         return true;
 
       case 'GET_CONTENT_STATE':

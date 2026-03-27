@@ -330,6 +330,11 @@ function handleStoreGazePoint(msg, sender) {
   }
 
   if (sender.tab.url) data.url = sender.tab.url;
+  // Store viewport dimensions for correct analytics in insights page
+  if (isNum(msg.viewportWidth) && isNum(msg.viewportHeight)) {
+    data.viewportWidth = msg.viewportWidth;
+    data.viewportHeight = msg.viewportHeight;
+  }
   persistDirty = true;
 }
 
@@ -352,6 +357,8 @@ function getHeatmapDataForTab(tabId) {
   if (!data) return { gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [], scrollEvents: [] };
   return {
     url: data.url,
+    viewportWidth: data.viewportWidth || null,
+    viewportHeight: data.viewportHeight || null,
     gazePoints: data.gazePoints,
     touchPoints: data.touchPoints,
     mousePoints: data.mousePoints,
@@ -370,6 +377,8 @@ function exportAllData() {
   for (const [tabId, data] of heatmapData) {
     allData[tabId] = {
       url: data.url,
+      viewportWidth: data.viewportWidth || null,
+      viewportHeight: data.viewportHeight || null,
       gazePoints: data.gazePoints,
       touchPoints: data.touchPoints,
       mousePoints: data.mousePoints,

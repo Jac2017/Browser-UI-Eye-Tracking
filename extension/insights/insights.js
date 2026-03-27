@@ -91,8 +91,9 @@ $('#btn-refresh').addEventListener('click', loadTabList);
 function analyzeData() {
   if (!currentData) return;
 
-  const viewW = window.screen.width;
-  const viewH = window.screen.height;
+  // Use stored viewport dimensions if available, otherwise estimate from screen
+  const viewW = currentData.viewportWidth || window.screen.width;
+  const viewH = currentData.viewportHeight || window.screen.height;
   const gazePoints = currentData.gazePoints || [];
 
   // Detect fixations
