@@ -12,9 +12,17 @@ let modelReady = false;
 
 const heatmapData = new Map();
 const sessionData = new Map();
-const newPageTabs = new Set();
 const FIRST_VIEWED_WINDOW_MS = 5000;
 const pageLoadTimes = new Map();
+
+// Rate limiting for broadcasts
+let lastBroadcastTime = 0;
+const BROADCAST_MIN_INTERVAL_MS = 40; // ~25 Hz max broadcast rate
+let pendingBroadcast = null;
+
+// Data size limits
+const MAX_GAZE_POINTS_PER_TAB = 50000;
+const MAX_INPUT_POINTS_PER_TAB = 20000;
 
 /* ========== HELPERS ========== */
 function getTabData(tabId) {
@@ -37,101 +45,127 @@ function isFirstViewedWindow(tabId) {
   return (Date.now() - loadTime) < FIRST_VIEWED_WINDOW_MS;
 }
 
-/* ========== MESSAGE HANDLING ========== */
+function trimArray(arr, maxLen) {
+  if (arr.length > maxLen) {
+    arr.splice(0, arr.length - Math.floor(maxLen * 0.75));
+  }
+}
+
+/* ========== SINGLE MESSAGE HANDLER ========== */
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  switch (msg.type) {
-    case 'GAZE_DATA':
-      handleGazeData(msg);
-      break;
+  try {
+    switch (msg.type) {
+      case 'GAZE_DATA':
+        handleGazeData(msg);
+        break;
 
-    case 'TRACKING_STARTED':
-      trackingActive = true;
-      trackerTabId = sender.tab?.id || null;
-      broadcastToContentScripts({ type: 'TRACKING_STATE', active: true });
-      break;
+      case 'TRACKING_STARTED':
+        trackingActive = true;
+        trackerTabId = sender.tab?.id || null;
+        broadcastToContentScripts({ type: 'TRACKING_STATE', active: true });
+        break;
 
-    case 'TRACKING_STOPPED':
-      trackingActive = false;
-      broadcastToContentScripts({ type: 'TRACKING_STATE', active: false });
-      break;
+      case 'TRACKING_STOPPED':
+        trackingActive = false;
+        broadcastToContentScripts({ type: 'TRACKING_STATE', active: false });
+        break;
 
-    case 'MODEL_READY':
-      modelReady = true;
-      trackerTabId = sender.tab?.id || null;
-      break;
+      case 'MODEL_READY':
+        modelReady = true;
+        trackerTabId = sender.tab?.id || null;
+        break;
 
-    case 'TOUCH_DATA':
-    case 'MOUSE_DATA':
-      handleInputData(msg, sender.tab?.id);
-      break;
+      case 'TOUCH_DATA':
+      case 'MOUSE_DATA':
+        handleInputData(msg, sender.tab?.id);
+        break;
 
-    case 'SCROLL_EVENT':
-      if (sender.tab) {
-        const data = getTabData(sender.tab.id);
-        data.scrollEvents.push({
-          scrollX: msg.scrollX,
-          scrollY: msg.scrollY,
-          pageHeight: msg.pageHeight,
-          viewHeight: msg.viewHeight,
-          timestamp: msg.timestamp,
-        });
+      case 'STORE_GAZE_POINT':
+        handleStoreGazePoint(msg, sender);
+        break;
+
+      case 'SCROLL_EVENT':
+        if (sender.tab) {
+          const scrollData = getTabData(sender.tab.id);
+          scrollData.scrollEvents.push({
+            scrollX: msg.scrollX,
+            scrollY: msg.scrollY,
+            pageHeight: msg.pageHeight,
+            viewHeight: msg.viewHeight,
+            timestamp: msg.timestamp,
+          });
+          trimArray(scrollData.scrollEvents, 5000);
+        }
+        break;
+
+      case 'GET_HEATMAP_DATA':
+        sendResponse(getHeatmapDataForTab(msg.tabId || sender.tab?.id));
+        return true;
+
+      case 'CLEAR_HEATMAP':
+        clearHeatmapData(msg.tabId || sender.tab?.id);
+        sendResponse({ ok: true });
+        return true;
+
+      case 'GET_TRACKING_STATE':
+        sendResponse({ active: trackingActive, modelReady, trackerTabId });
+        return true;
+
+      case 'OPEN_TRACKER':
+        openTrackerTab();
+        sendResponse({ ok: true });
+        return true;
+
+      case 'OPEN_INSIGHTS':
+        openInsightsTab();
+        sendResponse({ ok: true });
+        return true;
+
+      case 'GET_ALL_SESSION_DATA':
+        sendResponse({ data: Object.fromEntries(sessionData) });
+        return true;
+
+      case 'GET_ALL_TAB_DATA': {
+        const tabs = [];
+        for (const [tabId, data] of heatmapData) {
+          tabs.push({
+            tabId,
+            url: data.url,
+            gazeCount: data.gazePoints.length,
+            mouseCount: data.mousePoints.length,
+            touchCount: data.touchPoints.length,
+            firstViewedCount: data.firstViewedPoints.length,
+          });
+        }
+        sendResponse({ tabs });
+        return true;
       }
-      break;
 
-    case 'GET_HEATMAP_DATA':
-      sendResponse(getHeatmapDataForTab(msg.tabId || sender.tab?.id));
-      return true;
-
-    case 'CLEAR_HEATMAP':
-      clearHeatmapData(msg.tabId || sender.tab?.id);
-      sendResponse({ ok: true });
-      return true;
-
-    case 'GET_TRACKING_STATE':
-      sendResponse({ active: trackingActive, modelReady, trackerTabId });
-      return true;
-
-    case 'OPEN_TRACKER':
-      openTrackerTab();
-      sendResponse({ ok: true });
-      return true;
-
-    case 'OPEN_INSIGHTS':
-      openInsightsTab();
-      sendResponse({ ok: true });
-      return true;
-
-    case 'GET_ALL_SESSION_DATA':
-      sendResponse({ data: Object.fromEntries(sessionData) });
-      return true;
-
-    case 'GET_ALL_TAB_DATA': {
-      const tabs = [];
-      for (const [tabId, data] of heatmapData) {
-        tabs.push({
-          tabId,
-          url: data.url,
-          gazeCount: data.gazePoints.length,
-          mouseCount: data.mousePoints.length,
-          touchCount: data.touchPoints.length,
-          firstViewedCount: data.firstViewedPoints.length,
-        });
+      case 'EXPORT_SESSION': {
+        const exported = exportAllData();
+        // Check approximate size to avoid crash
+        const sizeEstimate = JSON.stringify(exported).length;
+        if (sizeEstimate > 50 * 1024 * 1024) {
+          sendResponse({ error: 'Session data too large to export in one batch', sizeMB: Math.round(sizeEstimate / 1024 / 1024) });
+        } else {
+          sendResponse({ data: exported });
+        }
+        return true;
       }
-      sendResponse({ tabs });
-      return true;
+
+      case 'CAPTURE_SCREENSHOT':
+        captureScreenshot(sender.tab?.id, sendResponse);
+        return true;
+
+      case 'SCREENSHOT_PROGRESS':
+        // Forward to popup if open — non-critical, fire and forget
+        break;
     }
-
-    case 'EXPORT_SESSION':
-      sendResponse({ data: exportAllData() });
-      return true;
-
-    case 'CAPTURE_SCREENSHOT':
-      captureScreenshot(sender.tab?.id, sendResponse);
-      return true;
-
-    case 'SCREENSHOT_PROGRESS':
-      // Could forward to popup/insights for progress display
-      break;
+  } catch (err) {
+    console.error('Service worker message error:', err, msg.type);
+    if (sendResponse) {
+      try { sendResponse({ error: err.message }); } catch (e) { /* port closed */ }
+    }
   }
 });
 
@@ -139,13 +173,32 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 function handleGazeData(msg) {
   if (!trackingActive) return;
 
-  broadcastToContentScripts({
+  const now = Date.now();
+  const gazeMsg = {
     type: 'GAZE_POINT',
     x: msg.x,
     y: msg.y,
     timestamp: msg.timestamp,
     confidence: msg.confidence,
-  });
+  };
+
+  // Rate-limit broadcasts to prevent spamming tabs
+  if (now - lastBroadcastTime >= BROADCAST_MIN_INTERVAL_MS) {
+    lastBroadcastTime = now;
+    broadcastToContentScripts(gazeMsg);
+    pendingBroadcast = null;
+  } else {
+    // Queue the latest point; it will be sent on next broadcast window
+    if (!pendingBroadcast) {
+      pendingBroadcast = setTimeout(() => {
+        if (pendingBroadcast) {
+          broadcastToContentScripts(gazeMsg);
+          pendingBroadcast = null;
+          lastBroadcastTime = Date.now();
+        }
+      }, BROADCAST_MIN_INTERVAL_MS);
+    }
+  }
 }
 
 function handleInputData(msg, tabId) {
@@ -160,16 +213,45 @@ function handleInputData(msg, tabId) {
 
   if (msg.type === 'TOUCH_DATA') {
     data.touchPoints.push(point);
+    trimArray(data.touchPoints, MAX_INPUT_POINTS_PER_TAB);
   } else {
     data.mousePoints.push(point);
+    trimArray(data.mousePoints, MAX_INPUT_POINTS_PER_TAB);
   }
+}
+
+function handleStoreGazePoint(msg, sender) {
+  if (!sender.tab) return;
+
+  const tabId = sender.tab.id;
+  const data = getTabData(tabId);
+
+  const point = {
+    x: msg.x, y: msg.y,
+    pageX: msg.pageX, pageY: msg.pageY,
+    scrollX: msg.scrollX, scrollY: msg.scrollY,
+    timestamp: msg.timestamp,
+    videoTime: msg.videoTime || null,
+    onVideo: msg.onVideo || false,
+  };
+
+  data.gazePoints.push(point);
+  trimArray(data.gazePoints, MAX_GAZE_POINTS_PER_TAB);
+
+  if (isFirstViewedWindow(tabId)) {
+    data.firstViewedPoints.push(point);
+  }
+
+  if (sender.tab.url) data.url = sender.tab.url;
 }
 
 function broadcastToContentScripts(message) {
   chrome.tabs.query({}, (tabs) => {
+    if (chrome.runtime.lastError) return;
+
     for (const tab of tabs) {
       if (tab.id === trackerTabId) continue;
-      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) continue;
+      if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('about:')) continue;
 
       chrome.tabs.sendMessage(tab.id, message).catch(() => {});
     }
@@ -197,7 +279,13 @@ function clearHeatmapData(tabId) {
 function exportAllData() {
   const allData = {};
   for (const [tabId, data] of heatmapData) {
-    allData[tabId] = { ...data };
+    allData[tabId] = {
+      url: data.url,
+      gazePoints: data.gazePoints,
+      touchPoints: data.touchPoints,
+      mousePoints: data.mousePoints,
+      firstViewedPoints: data.firstViewedPoints,
+    };
   }
   return {
     heatmapData: allData,
@@ -208,38 +296,36 @@ function exportAllData() {
 
 /* ========== SCREENSHOT CAPTURE ========== */
 function captureScreenshot(tabId, sendResponse) {
-  // Find the window containing the requesting tab
-  if (tabId) {
-    chrome.tabs.get(tabId, (tab) => {
-      if (chrome.runtime.lastError || !tab) {
-        sendResponse({ error: 'Tab not found' });
-        return;
-      }
-
-      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }, (dataUrl) => {
-        if (chrome.runtime.lastError) {
-          sendResponse({ error: chrome.runtime.lastError.message });
-          return;
-        }
-        sendResponse({ dataUrl });
-      });
-    });
-  } else {
-    chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+  const doCap = (windowId) => {
+    chrome.tabs.captureVisibleTab(windowId, { format: 'png' }, (dataUrl) => {
       if (chrome.runtime.lastError) {
         sendResponse({ error: chrome.runtime.lastError.message });
         return;
       }
       sendResponse({ dataUrl });
     });
+  };
+
+  if (tabId) {
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        sendResponse({ error: 'Tab not found' });
+        return;
+      }
+      doCap(tab.windowId);
+    });
+  } else {
+    doCap(null);
   }
 }
 
 /* ========== TAB LIFECYCLE ========== */
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
+    // Don't track extension pages
+    if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+
     pageLoadTimes.set(tabId, Date.now());
-    newPageTabs.add(tabId);
 
     const data = getTabData(tabId);
     data.url = tab.url;
@@ -255,7 +341,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     }).catch(() => {});
 
     setTimeout(() => {
-      newPageTabs.delete(tabId);
       pageLoadTimes.delete(tabId);
     }, FIRST_VIEWED_WINDOW_MS);
   }
@@ -265,18 +350,23 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   const data = heatmapData.get(tabId);
   if (data && data.url && data.gazePoints.length > 0) {
     const existing = sessionData.get(data.url) || {
-      gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [], scrollEvents: []
+      gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: []
     };
-    existing.gazePoints.push(...data.gazePoints);
-    existing.touchPoints.push(...data.touchPoints);
-    existing.mousePoints.push(...data.mousePoints);
-    existing.firstViewedPoints.push(...data.firstViewedPoints);
-    if (data.scrollEvents) existing.scrollEvents.push(...data.scrollEvents);
+    // Limit session data growth
+    const maxSessionPts = 100000;
+    if (existing.gazePoints.length < maxSessionPts) {
+      existing.gazePoints.push(...data.gazePoints);
+      existing.touchPoints.push(...data.touchPoints);
+      existing.mousePoints.push(...data.mousePoints);
+      existing.firstViewedPoints.push(...data.firstViewedPoints);
+      trimArray(existing.gazePoints, maxSessionPts);
+      trimArray(existing.touchPoints, maxSessionPts);
+      trimArray(existing.mousePoints, maxSessionPts);
+    }
     sessionData.set(data.url, existing);
   }
 
   heatmapData.delete(tabId);
-  newPageTabs.delete(tabId);
   pageLoadTimes.delete(tabId);
 });
 
@@ -284,11 +374,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 function openTrackerTab() {
   const trackerUrl = chrome.runtime.getURL('tracker/tracker.html');
   chrome.tabs.query({ url: trackerUrl }, (tabs) => {
+    if (chrome.runtime.lastError) return;
     if (tabs.length > 0) {
       chrome.tabs.update(tabs[0].id, { active: true });
     } else {
       chrome.tabs.create({ url: trackerUrl, pinned: true }, (tab) => {
-        trackerTabId = tab.id;
+        if (tab) trackerTabId = tab.id;
       });
     }
   });
@@ -297,6 +388,7 @@ function openTrackerTab() {
 function openInsightsTab() {
   const insightsUrl = chrome.runtime.getURL('insights/insights.html');
   chrome.tabs.query({ url: insightsUrl }, (tabs) => {
+    if (chrome.runtime.lastError) return;
     if (tabs.length > 0) {
       chrome.tabs.update(tabs[0].id, { active: true });
     } else {
@@ -309,36 +401,10 @@ function openInsightsTab() {
 function updateBadge() {
   const text = trackingActive ? 'ON' : '';
   const color = trackingActive ? '#238636' : '#484f58';
-  chrome.action.setBadgeText({ text });
-  chrome.action.setBadgeBackgroundColor({ color });
+  chrome.action.setBadgeText({ text }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
 }
 
 setInterval(updateBadge, 2000);
-
-/* ========== STORE GAZE POINTS PER TAB ========== */
-chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (msg.type === 'STORE_GAZE_POINT' && sender.tab) {
-    const tabId = sender.tab.id;
-    const data = getTabData(tabId);
-
-    const point = {
-      x: msg.x, y: msg.y,
-      pageX: msg.pageX, pageY: msg.pageY,
-      scrollX: msg.scrollX, scrollY: msg.scrollY,
-      timestamp: msg.timestamp,
-      videoTime: msg.videoTime,
-      onVideo: msg.onVideo,
-    };
-
-    data.gazePoints.push(point);
-
-    if (isFirstViewedWindow(tabId)) {
-      data.firstViewedPoints.push(point);
-    }
-
-    const url = sender.tab.url;
-    if (url) data.url = url;
-  }
-});
 
 console.log('EyeD service worker v1.1 initialized');

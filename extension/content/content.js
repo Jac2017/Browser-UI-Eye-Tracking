@@ -154,18 +154,19 @@
 
     updateGazeCursor(sx, sy);
 
-    // Store in background with enriched data
+    // Store in background with enriched data from the point we just created
+    const lastPoint = state.gazePoints[state.gazePoints.length - 1];
     chrome.runtime.sendMessage({
       type: 'STORE_GAZE_POINT',
       x: sx, y: sy,
-      pageX: sx * window.innerWidth + window.scrollX,
-      pageY: sy * window.innerHeight + window.scrollY,
-      scrollX: window.scrollX,
-      scrollY: window.scrollY,
+      pageX: lastPoint.pageX,
+      pageY: lastPoint.pageY,
+      scrollX: lastPoint.scrollX,
+      scrollY: lastPoint.scrollY,
       timestamp,
-      videoTime: state.gazePoints[state.gazePoints.length - 1]?.videoTime,
-      onVideo: state.gazePoints[state.gazePoints.length - 1]?.onVideo,
-    });
+      videoTime: lastPoint.videoTime,
+      onVideo: lastPoint.onVideo,
+    }).catch(() => {});
 
     state.heatmapDirty = true;
     state.analyticsDirty = true;
@@ -213,7 +214,15 @@
   }
 
   /* ========== FIRST-VIEWED DETECTION ========== */
+  let lastFirstViewedCheck = 0;
+  const FIRST_VIEWED_THROTTLE_MS = 100;
+  const MAX_FIRST_VIEWED_POINTS = 50;
+
   function identifyFirstViewedElement(x, y, timestamp) {
+    // Throttle first-viewed detection
+    if (timestamp - lastFirstViewedCheck < FIRST_VIEWED_THROTTLE_MS) return;
+    lastFirstViewedCheck = timestamp;
+
     const px = x * window.innerWidth;
     const py = y * window.innerHeight;
 
@@ -227,22 +236,28 @@
     if (canvas) canvas.style.display = '';
     if (cursor) cursor.style.display = '';
 
-    if (element && !element.id?.startsWith('eyed-') && !state.firstViewedElements.includes(element)) {
-      state.firstViewedElements.push(element);
-      const rect = element.getBoundingClientRect();
-      state.firstViewedPoints.push({
-        x, y,
-        pageX: px + window.scrollX,
-        pageY: py + window.scrollY,
-        timestamp,
-        tagName: element.tagName,
-        text: element.textContent?.substring(0, 50),
-        selector: element.id ? `#${element.id}` : element.tagName.toLowerCase(),
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-      });
+    if (element && !element.id?.startsWith('eyed-')) {
+      // Use selector string instead of DOM reference to avoid memory leak
+      const selector = element.id ? `#${element.id}` : `${element.tagName.toLowerCase()}${element.className && typeof element.className === 'string' ? '.' + element.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`;
 
-      if (state.firstViewedElements.length >= 20) {
-        state.isNewPage = false;
+      if (!state.firstViewedElements.includes(selector)) {
+        state.firstViewedElements.push(selector);
+        const rect = element.getBoundingClientRect();
+        state.firstViewedPoints.push({
+          x, y,
+          pageX: px + window.scrollX,
+          pageY: py + window.scrollY,
+          timestamp,
+          tagName: element.tagName,
+          text: element.textContent?.substring(0, 50),
+          selector,
+          rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        });
+
+        // Cap first-viewed arrays
+        if (state.firstViewedElements.length >= MAX_FIRST_VIEWED_POINTS) {
+          state.isNewPage = false;
+        }
       }
     }
   }
@@ -265,7 +280,7 @@
           pageX: e.clientX + window.scrollX,
           pageY: e.clientY + window.scrollY,
           timestamp: Date.now(),
-        });
+        }).catch(() => {});
 
         if (state.mousePoints.length > 5000) state.mousePoints = state.mousePoints.slice(-2500);
       }
@@ -287,7 +302,7 @@
           pageX: touch.clientX + window.scrollX,
           pageY: touch.clientY + window.scrollY,
           timestamp: Date.now(),
-        });
+        }).catch(() => {});
       }
       if (state.touchPoints.length > 5000) state.touchPoints = state.touchPoints.slice(-2500);
     }
@@ -304,7 +319,7 @@
         pageHeight: document.documentElement.scrollHeight,
         viewHeight: window.innerHeight,
         timestamp: Date.now(),
-      });
+      }).catch(() => {});
     }, { passive: true });
   }
 

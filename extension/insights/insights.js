@@ -61,6 +61,10 @@ $('#tab-selector').addEventListener('change', async (e) => {
   const tabId = e.target.value;
   if (!tabId) return;
 
+  // Show loading state
+  $('#score-value').textContent = '...';
+  $('#m-fixations').textContent = '...';
+
   // Try to get data from the selected option's embedded JSON
   const selectedOpt = e.target.selectedOptions[0];
   if (selectedOpt.dataset.json) {
@@ -71,8 +75,11 @@ $('#tab-selector').addEventListener('change', async (e) => {
   }
 
   if (currentData) {
-    analyzeData();
-    renderAll();
+    // Defer heavy analysis to next frame to avoid blocking UI
+    requestAnimationFrame(() => {
+      analyzeData();
+      renderAll();
+    });
   }
 });
 
@@ -179,18 +186,57 @@ function computeEngagementSimple(gazePoints, fixations, sessionDuration) {
   const avgDur = fixations.length > 0 ? totalFixTime / fixations.length : 0;
 
   // Scan pattern
+  const xs = fixations.map(f => f.cx);
   const ys = fixations.map(f => f.cy);
   let monotonic = 0;
   for (let i = 1; i < ys.length; i++) {
     if (ys[i] >= ys[i - 1] - 0.05) monotonic++;
   }
   const isLinear = ys.length > 1 && monotonic / (ys.length - 1) > 0.7;
-  const pattern = fixations.length < 5 ? 'insufficient' : isLinear ? 'linear' : 'exploratory';
+
+  // F-pattern check
+  let topHorizontal = 0, leftVertical = 0;
+  for (let i = 0; i < Math.min(fixations.length, 10); i++) {
+    if (ys[i] < 0.3) topHorizontal++;
+    if (xs[i] < 0.4) leftVertical++;
+  }
+  const isFPattern = topHorizontal >= 3 && leftVertical >= 3;
+  const pattern = fixations.length < 5 ? 'insufficient' : isFPattern ? 'F-pattern' : isLinear ? 'linear' : 'exploratory';
 
   const stability = Math.min(1, fixRatio * 1.5);
   const depth = Math.min(1, avgDur / 500);
 
-  const score = Math.round(stability * 30 + depth * 25 + 20 + 15 + (pattern !== 'exploratory' ? 10 : 0));
+  // Estimate breadth from spatial diversity of fixations (without AOI/DOM access)
+  const gridSize = 4;
+  const visitedCells = new Set();
+  for (const fix of fixations) {
+    const gx = Math.min(gridSize - 1, Math.floor(fix.cx * gridSize));
+    const gy = Math.min(gridSize - 1, Math.floor(fix.cy * gridSize));
+    visitedCells.add(`${gx},${gy}`);
+  }
+  const breadth = visitedCells.size / (gridSize * gridSize);
+
+  // Estimate revisits: count how often fixation returns to a previously visited grid cell
+  let revisitCount = 0;
+  const cellHistory = [];
+  for (const fix of fixations) {
+    const gx = Math.min(gridSize - 1, Math.floor(fix.cx * gridSize));
+    const gy = Math.min(gridSize - 1, Math.floor(fix.cy * gridSize));
+    const cell = `${gx},${gy}`;
+    if (cellHistory.length > 0 && cellHistory[cellHistory.length - 1] !== cell && cellHistory.includes(cell)) {
+      revisitCount++;
+    }
+    cellHistory.push(cell);
+  }
+  const revisitRatio = fixations.length > 0 ? revisitCount / fixations.length : 0;
+
+  const score = Math.round(
+    stability * 30 +
+    depth * 25 +
+    breadth * 20 +
+    Math.min(1, revisitRatio * 5) * 15 +
+    (pattern !== 'exploratory' && pattern !== 'insufficient' ? 10 : 0)
+  );
 
   return {
     score: Math.min(100, score),
@@ -203,9 +249,9 @@ function computeEngagementSimple(gazePoints, fixations, sessionDuration) {
     breakdown: {
       stability: Math.round(stability * 30),
       depth: Math.round(depth * 25),
-      breadth: 20,
-      revisits: 15,
-      pattern: pattern !== 'exploratory' ? 10 : 0,
+      breadth: Math.round(breadth * 20),
+      revisits: Math.round(Math.min(1, revisitRatio * 5) * 15),
+      pattern: (pattern !== 'exploratory' && pattern !== 'insufficient') ? 10 : 0,
     }
   };
 }

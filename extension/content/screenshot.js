@@ -360,20 +360,18 @@ const EyedScreenshot = (() => {
     ctx.setLineDash([6, 4]);
 
     for (const s of saccades) {
-      const fx = s.fromX * w * scaleX / (scaleX || 1);
-      const fy = s.fromY * h * scaleY / (scaleY || 1);
-      const tx = s.toX * w * scaleX / (scaleX || 1);
-      const ty = s.toY * h * scaleY / (scaleY || 1);
-      // Use page coordinates if available
-      const fromX = (s.fromPageX || fx) * scaleX;
-      const fromY = (s.fromPageY || fy) * scaleY;
-      const toX = (s.toPageX || tx) * scaleX;
-      const toY = (s.toPageY || ty) * scaleY;
+      // Use page coordinates from saccade objects (added by analytics.js buildScanpath)
+      const fromX = s.fromPageX != null ? s.fromPageX * scaleX : s.fromX * w;
+      const fromY = s.fromPageY != null ? s.fromPageY * scaleY : s.fromY * h;
+      const toX = s.toPageX != null ? s.toPageX * scaleX : s.toX * w;
+      const toY = s.toPageY != null ? s.toPageY * scaleY : s.toY * h;
 
       ctx.beginPath();
       ctx.moveTo(fromX, fromY);
       ctx.lineTo(toX, toY);
       ctx.stroke();
+
+      drawArrowhead(ctx, fromX, fromY, toX, toY);
     }
     ctx.setLineDash([]);
 

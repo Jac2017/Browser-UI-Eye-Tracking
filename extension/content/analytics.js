@@ -10,7 +10,6 @@ const EyedAnalytics = (() => {
   // I-DT (Identification by Dispersion Threshold) fixation detection
   const FIXATION_DISPERSION_PX = 50;    // Max spread in pixels for a fixation cluster
   const FIXATION_MIN_DURATION_MS = 150; // Minimum dwell time to count as fixation
-  const SACCADE_VELOCITY_THRESHOLD = 500; // px/sec to classify as saccade
 
   /**
    * Detect fixations from raw gaze points using I-DT algorithm.
@@ -26,13 +25,13 @@ const EyedAnalytics = (() => {
     let windowStart = 0;
     let windowEnd = 0;
 
+    // Sliding window with incremental min/max tracking (avoids O(n²) slicing)
     while (windowStart < points.length) {
       windowEnd = windowStart + 1;
 
       // Expand window while dispersion is within threshold
       while (windowEnd < points.length) {
-        const windowPoints = points.slice(windowStart, windowEnd + 1);
-        const dispersion = calcDispersion(windowPoints, viewW, viewH);
+        const dispersion = calcDispersionRange(points, windowStart, windowEnd + 1, viewW, viewH);
 
         if (dispersion <= FIXATION_DISPERSION_PX) {
           windowEnd++;
@@ -44,20 +43,26 @@ const EyedAnalytics = (() => {
       const duration = points[Math.min(windowEnd, points.length - 1)].timestamp - points[windowStart].timestamp;
 
       if (windowEnd - windowStart >= 2 && duration >= FIXATION_MIN_DURATION_MS) {
-        const fixPts = points.slice(windowStart, windowEnd);
-        const cx = fixPts.reduce((s, p) => s + p.x, 0) / fixPts.length;
-        const cy = fixPts.reduce((s, p) => s + p.y, 0) / fixPts.length;
-        const pageCx = fixPts.reduce((s, p) => s + (p.pageX || p.x * viewW), 0) / fixPts.length;
-        const pageCy = fixPts.reduce((s, p) => s + (p.pageY || p.y * viewH), 0) / fixPts.length;
+        // Compute centroid for the fixation window
+        let sumX = 0, sumY = 0, sumPX = 0, sumPY = 0;
+        const count = windowEnd - windowStart;
+        for (let i = windowStart; i < windowEnd; i++) {
+          sumX += points[i].x;
+          sumY += points[i].y;
+          sumPX += (points[i].pageX || points[i].x * viewW);
+          sumPY += (points[i].pageY || points[i].y * viewH);
+        }
 
         fixations.push({
-          cx, cy,
-          pageCx, pageCy,
-          startTime: fixPts[0].timestamp,
-          endTime: fixPts[fixPts.length - 1].timestamp,
+          cx: sumX / count,
+          cy: sumY / count,
+          pageCx: sumPX / count,
+          pageCy: sumPY / count,
+          startTime: points[windowStart].timestamp,
+          endTime: points[windowEnd - 1].timestamp,
           duration,
-          pointCount: fixPts.length,
-          points: fixPts,
+          pointCount: count,
+          points: points.slice(windowStart, windowEnd),
         });
 
         windowStart = windowEnd;
@@ -69,15 +74,15 @@ const EyedAnalytics = (() => {
     return fixations;
   }
 
-  function calcDispersion(points, viewW, viewH) {
+  function calcDispersionRange(points, start, end, viewW, viewH) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    for (const p of points) {
-      const px = p.x * viewW;
-      const py = p.y * viewH;
-      minX = Math.min(minX, px);
-      maxX = Math.max(maxX, px);
-      minY = Math.min(minY, py);
-      maxY = Math.max(maxY, py);
+    for (let i = start; i < end; i++) {
+      const px = points[i].x * viewW;
+      const py = points[i].y * viewH;
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
     }
     return (maxX - minX) + (maxY - minY);
   }
@@ -105,6 +110,8 @@ const EyedAnalytics = (() => {
         toIndex: i + 1,
         fromX: prev.cx, fromY: prev.cy,
         toX: curr.cx, toY: curr.cy,
+        fromPageX: prev.pageCx, fromPageY: prev.pageCy,
+        toPageX: curr.pageCx, toPageY: curr.pageCy,
         distance,
         duration,
         velocity,
@@ -289,7 +296,7 @@ const EyedAnalytics = (() => {
       Math.min(1, avgFixDuration / 500) * 25 +
       diversity * 20 +
       Math.min(1, revisitRatio * 5) * 15 +
-      (scanPattern !== 'random' ? 10 : 0)
+      (scanPattern !== 'exploratory' && scanPattern !== 'insufficient' ? 10 : 0)
     );
 
     return {
@@ -308,13 +315,13 @@ const EyedAnalytics = (() => {
         depth: Math.round(Math.min(1, avgFixDuration / 500) * 25),
         breadth: Math.round(diversity * 20),
         revisits: Math.round(Math.min(1, revisitRatio * 5) * 15),
-        pattern: scanPattern !== 'random' ? 10 : 0,
+        pattern: scanPattern !== 'exploratory' && scanPattern !== 'insufficient' ? 10 : 0,
       }
     };
   }
 
   /**
-   * Detect dominant scan pattern (F-pattern, Z-pattern, linear, or random).
+   * Detect dominant scan pattern (F-pattern, Z-pattern, linear, or exploratory).
    */
   function detectScanPattern(fixations) {
     if (fixations.length < 5) return 'insufficient';

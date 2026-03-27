@@ -130,14 +130,15 @@ $('#btn-screenshot-fullpage').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      // Close popup so it doesn't appear in screenshots
-      chrome.tabs.sendMessage(tab.id, {
+      // Send message first, then close popup after confirmed delivery
+      await chrome.tabs.sendMessage(tab.id, {
         type: 'CAPTURE_FULLPAGE_SCREENSHOT',
         download: true,
         includeHeatmap: true,
         includeScanpath: true,
         includeFirstViewed: true,
       });
+      // Close popup after message is delivered (won't appear in subsequent captures)
       window.close();
     }
   } catch (e) {}
