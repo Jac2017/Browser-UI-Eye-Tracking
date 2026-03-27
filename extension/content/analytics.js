@@ -342,7 +342,6 @@ const EyedAnalytics = (() => {
     // Check for Z-pattern: top-left → top-right → bottom-left → bottom-right
     if (fixations.length >= 4) {
       const first = fixations[0];
-      const mid = fixations[Math.floor(fixations.length / 2)];
       const last = fixations[fixations.length - 1];
 
       if (first.cy < 0.4 && last.cy > 0.6) {
@@ -368,7 +367,8 @@ const EyedAnalytics = (() => {
     let aboveDwell = 0, belowDwell = 0;
 
     for (const fix of fixations) {
-      const py = fix.cy * viewH;
+      // Use absolute page Y coordinate for scroll-aware fold detection
+      const py = fix.pageCy != null ? fix.pageCy : fix.cy * viewH;
       if (py <= viewH) {
         aboveFold++;
         aboveDwell += fix.duration;

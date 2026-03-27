@@ -601,7 +601,7 @@
         dataUrl = await EyedScreenshot.captureFullPage({
           ...options,
           onProgress: (pct) => {
-            chrome.runtime.sendMessage({ type: 'SCREENSHOT_PROGRESS', progress: pct });
+            chrome.runtime.sendMessage({ type: 'SCREENSHOT_PROGRESS', progress: pct }).catch(() => {});
           },
         });
       } else {

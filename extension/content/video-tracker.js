@@ -89,6 +89,9 @@ const EyedVideoTracker = (() => {
   }
 
   function pollActiveVideo() {
+    // Prune removed elements (no longer in DOM)
+    state.videos = state.videos.filter(v => document.contains(v));
+
     // Find any playing video
     for (const v of state.videos) {
       if (v.tagName === 'VIDEO' && !v.paused && !v.ended) {

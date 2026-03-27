@@ -120,15 +120,15 @@ function detectFixationsSimple(points, viewW, viewH) {
     let end = start + 1;
 
     while (end < points.length) {
-      const slice = points.slice(start, end + 1);
+      // Calculate dispersion directly over range (avoids O(n²) slicing)
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-      for (const p of slice) {
-        const px = p.x * viewW;
-        const py = p.y * viewH;
-        minX = Math.min(minX, px);
-        maxX = Math.max(maxX, px);
-        minY = Math.min(minY, py);
-        maxY = Math.max(maxY, py);
+      for (let i = start; i <= end; i++) {
+        const px = points[i].x * viewW;
+        const py = points[i].y * viewH;
+        if (px < minX) minX = px;
+        if (px > maxX) maxX = px;
+        if (py < minY) minY = py;
+        if (py > maxY) maxY = py;
       }
 
       if ((maxX - minX) + (maxY - minY) <= DISPERSION) {
@@ -141,17 +141,21 @@ function detectFixationsSimple(points, viewW, viewH) {
     const duration = points[Math.min(end, points.length - 1)].timestamp - points[start].timestamp;
 
     if (end - start >= 2 && duration >= MIN_DURATION) {
-      const fixPts = points.slice(start, end);
-      const cx = fixPts.reduce((s, p) => s + p.x, 0) / fixPts.length;
-      const cy = fixPts.reduce((s, p) => s + p.y, 0) / fixPts.length;
+      let sumX = 0, sumY = 0;
+      const count = end - start;
+      for (let i = start; i < end; i++) {
+        sumX += points[i].x;
+        sumY += points[i].y;
+      }
 
       fixations.push({
         index: fixations.length + 1,
-        cx, cy,
-        startTime: fixPts[0].timestamp,
-        endTime: fixPts[fixPts.length - 1].timestamp,
+        cx: sumX / count,
+        cy: sumY / count,
+        startTime: points[start].timestamp,
+        endTime: points[end - 1].timestamp,
         duration,
-        pointCount: fixPts.length,
+        pointCount: count,
       });
       start = end;
     } else {
@@ -256,6 +260,13 @@ function computeEngagementSimple(gazePoints, fixations, sessionDuration) {
   };
 }
 
+/* ========== HELPERS ========== */
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 /* ========== RENDERING ========== */
 function renderAll() {
   renderEngagement();
@@ -317,8 +328,8 @@ function renderOverview() {
       <div class="item-row">
         <span class="item-rank orange">${i + 1}</span>
         <div class="item-info">
-          <div class="item-name">${p.tagName || 'Element'}</div>
-          <div class="item-detail">${p.text || `(${(p.x * 100).toFixed(0)}%, ${(p.y * 100).toFixed(0)}%)`}</div>
+          <div class="item-name">${escapeHtml(p.tagName || 'Element')}</div>
+          <div class="item-detail">${escapeHtml(p.text || `(${(p.x * 100).toFixed(0)}%, ${(p.y * 100).toFixed(0)}%)`)}</div>
         </div>
       </div>
     `).join('');
