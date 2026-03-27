@@ -813,6 +813,11 @@
         }
         return true;
 
+      case 'TOGGLE_REPLAY':
+        toggleReplay();
+        sendResponse({ ok: true });
+        return true;
+
       case 'CLEAR_LOCAL_DATA':
         state.gazePoints = [];
         state.touchPoints = [];
@@ -825,11 +830,167 @@
         state._gazeNonUIDirty = true;
         state.heatmapDirty = true;
         state.analyticsDirty = true;
+        stopReplay();
         if (state.showHeatmap) queueRender();
         sendResponse({ ok: true });
         return true;
     }
   });
+
+  /* ========== GAZE REPLAY / PLAYBACK ========== */
+  const replay = {
+    active: false,
+    playing: false,
+    index: 0,
+    speed: 1,
+    animFrame: null,
+    startTime: 0,
+    bar: null,
+    cursor: null,
+  };
+
+  function createReplayUI() {
+    if (document.getElementById('eyed-replay-bar')) return;
+
+    const bar = document.createElement('div');
+    bar.id = 'eyed-replay-bar';
+    bar.innerHTML = `
+      <button id="eyed-replay-play" class="eyed-replay-btn">Play</button>
+      <input type="range" id="eyed-replay-scrubber" min="0" max="100" value="0" step="0.1">
+      <span id="eyed-replay-time">0:00 / 0:00</span>
+      <select id="eyed-replay-speed">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+      </select>
+      <button id="eyed-replay-close" class="eyed-replay-btn">✕</button>
+    `;
+    document.documentElement.appendChild(bar);
+
+    const cursor = document.createElement('div');
+    cursor.id = 'eyed-replay-cursor';
+    document.documentElement.appendChild(cursor);
+
+    replay.bar = bar;
+    replay.cursor = cursor;
+
+    document.getElementById('eyed-replay-play').addEventListener('click', toggleReplayPlayback);
+    document.getElementById('eyed-replay-close').addEventListener('click', stopReplay);
+    document.getElementById('eyed-replay-speed').addEventListener('change', (e) => {
+      replay.speed = parseFloat(e.target.value);
+    });
+    document.getElementById('eyed-replay-scrubber').addEventListener('input', (e) => {
+      const pts = getReplayPoints();
+      if (pts.length === 0) return;
+      replay.index = Math.floor((parseFloat(e.target.value) / 100) * (pts.length - 1));
+      updateReplayPosition();
+    });
+  }
+
+  function getReplayPoints() {
+    return state.gazePoints.filter(p => !p.isBrowserUI);
+  }
+
+  function toggleReplay() {
+    if (replay.active) {
+      stopReplay();
+    } else {
+      startReplay();
+    }
+  }
+
+  function startReplay() {
+    const pts = getReplayPoints();
+    if (pts.length < 2) return;
+
+    replay.active = true;
+    replay.index = 0;
+    replay.playing = false;
+    createReplayUI();
+    replay.bar.style.display = 'flex';
+    replay.cursor.style.display = 'block';
+    updateReplayPosition();
+  }
+
+  function stopReplay() {
+    replay.active = false;
+    replay.playing = false;
+    if (replay.animFrame) { cancelAnimationFrame(replay.animFrame); replay.animFrame = null; }
+    if (replay.bar) replay.bar.style.display = 'none';
+    if (replay.cursor) replay.cursor.style.display = 'none';
+  }
+
+  function toggleReplayPlayback() {
+    if (replay.playing) {
+      replay.playing = false;
+      if (replay.animFrame) { cancelAnimationFrame(replay.animFrame); replay.animFrame = null; }
+      document.getElementById('eyed-replay-play').textContent = 'Play';
+    } else {
+      replay.playing = true;
+      replay.startTime = performance.now();
+      document.getElementById('eyed-replay-play').textContent = 'Pause';
+      animateReplay();
+    }
+  }
+
+  function animateReplay() {
+    if (!replay.playing || !replay.active) return;
+
+    const pts = getReplayPoints();
+    if (replay.index >= pts.length - 1) {
+      replay.playing = false;
+      document.getElementById('eyed-replay-play').textContent = 'Play';
+      return;
+    }
+
+    const current = pts[replay.index];
+    const next = pts[replay.index + 1];
+    const timeDiff = (next.timestamp - current.timestamp) / replay.speed;
+    const elapsed = performance.now() - replay.startTime;
+
+    if (elapsed >= timeDiff) {
+      replay.index++;
+      replay.startTime = performance.now();
+      updateReplayPosition();
+    }
+
+    replay.animFrame = requestAnimationFrame(animateReplay);
+  }
+
+  function updateReplayPosition() {
+    const pts = getReplayPoints();
+    if (pts.length === 0 || replay.index >= pts.length) return;
+
+    const point = pts[replay.index];
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const px = point.pageX != null ? point.pageX - window.scrollX : point.x * vw;
+    const py = point.pageY != null ? point.pageY - window.scrollY : point.y * vh;
+
+    if (replay.cursor) {
+      replay.cursor.style.left = px + 'px';
+      replay.cursor.style.top = py + 'px';
+    }
+
+    // Update scrubber
+    const scrubber = document.getElementById('eyed-replay-scrubber');
+    if (scrubber) scrubber.value = (replay.index / (pts.length - 1)) * 100;
+
+    // Update time display
+    const timeLabel = document.getElementById('eyed-replay-time');
+    if (timeLabel && pts.length > 1) {
+      const elapsed = (point.timestamp - pts[0].timestamp) / 1000;
+      const total = (pts[pts.length - 1].timestamp - pts[0].timestamp) / 1000;
+      timeLabel.textContent = `${formatTime(elapsed)} / ${formatTime(total)}`;
+    }
+  }
+
+  function formatTime(sec) {
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  }
 
   /* ========== INIT ========== */
   function init() {

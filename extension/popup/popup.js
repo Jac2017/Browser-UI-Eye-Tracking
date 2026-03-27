@@ -168,6 +168,62 @@ $('#btn-clear').addEventListener('click', async () => {
   } catch (e) {}
 });
 
+/* ========== REPLAY ========== */
+$('#btn-replay').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_REPLAY' });
+  } catch (e) {}
+});
+
+/* ========== SESSION MANAGEMENT ========== */
+$('#btn-name-session').addEventListener('click', async () => {
+  const name = $('#session-name').value.trim();
+  if (name) {
+    await chrome.runtime.sendMessage({ type: 'NAME_SESSION', name });
+    $('#session-name').value = '';
+    loadSessionInfo();
+  }
+});
+
+$('#btn-save-session').addEventListener('click', async () => {
+  const name = $('#session-name').value.trim() || undefined;
+  await chrome.runtime.sendMessage({ type: 'SAVE_SESSION', name });
+  loadSessionInfo();
+});
+
+$('#btn-new-session').addEventListener('click', async () => {
+  const name = $('#session-name').value.trim() || undefined;
+  await chrome.runtime.sendMessage({ type: 'NEW_SESSION', name });
+  $('#session-name').value = '';
+  loadSessionInfo();
+  updateStatus();
+});
+
+async function loadSessionInfo() {
+  try {
+    const info = await chrome.runtime.sendMessage({ type: 'GET_SESSION_INFO' });
+    if (!info) return;
+
+    if (info.name) {
+      $('#session-name').placeholder = info.name;
+    }
+
+    const container = $('#saved-sessions');
+    if (info.savedSessions && info.savedSessions.length > 0) {
+      container.innerHTML = info.savedSessions.map(s =>
+        `<div class="saved-session-item">
+          <span class="session-name">${s.name}</span>
+          <span class="session-meta">${s.totalGaze} pts</span>
+        </div>`
+      ).join('');
+    } else {
+      container.innerHTML = '';
+    }
+  } catch (e) {}
+}
+
 /* ========== INIT ========== */
 updateStatus();
+loadSessionInfo();
 setInterval(updateStatus, 2000);

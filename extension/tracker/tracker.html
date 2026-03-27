@@ -13,6 +13,76 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
 </head>
 <body>
+  <!-- Privacy Consent Overlay (shown before webcam access) -->
+  <div id="consent-overlay">
+    <div class="consent-card">
+      <img src="../icons/icon128.png" alt="EyeD" class="consent-logo">
+      <h1>EyeD Eye Tracker</h1>
+      <p class="consent-desc">This tool uses your webcam to track eye gaze and generate attention heatmaps on web pages.</p>
+      <div class="consent-details">
+        <h3>What we access:</h3>
+        <ul>
+          <li>Webcam video (processed locally, never uploaded)</li>
+          <li>Eye position data (stays in your browser)</li>
+          <li>Page elements you view (for analytics)</li>
+        </ul>
+        <h3>Your privacy:</h3>
+        <ul>
+          <li>All processing happens on-device</li>
+          <li>No data is sent to any server</li>
+          <li>You can delete all data at any time</li>
+          <li>A visible indicator shows when tracking is active</li>
+        </ul>
+      </div>
+      <label class="consent-check">
+        <input type="checkbox" id="consent-checkbox">
+        I understand and consent to webcam access for eye tracking
+      </label>
+      <button id="btn-consent" class="btn primary full-width" disabled>Continue</button>
+      <button id="btn-decline" class="btn danger-outline full-width">Decline</button>
+    </div>
+  </div>
+
+  <!-- Onboarding Overlay (shown on first run after consent) -->
+  <div id="onboarding-overlay" style="display:none;">
+    <div class="onboarding-card">
+      <div id="onboarding-steps">
+        <div class="onboard-step active" data-step="0">
+          <div class="step-icon">1</div>
+          <h2>Welcome to EyeD</h2>
+          <p>Track where your eyes look on any web page. Let's set up in 4 quick steps.</p>
+        </div>
+        <div class="onboard-step" data-step="1">
+          <div class="step-icon">2</div>
+          <h2>Calibrate</h2>
+          <p>Look at targets on screen and tap them. This teaches the model where you're looking. More points = better accuracy.</p>
+        </div>
+        <div class="onboard-step" data-step="2">
+          <div class="step-icon">3</div>
+          <h2>Train & Validate</h2>
+          <p>After calibration, train the model. Then validate accuracy — you'll see your average error in pixels.</p>
+        </div>
+        <div class="onboard-step" data-step="3">
+          <div class="step-icon">4</div>
+          <h2>Start Tracking</h2>
+          <p>Hit "Start Tracking" and browse normally. Open the popup to toggle heatmaps, take screenshots, or view insights.</p>
+        </div>
+      </div>
+      <div class="onboard-nav">
+        <div class="onboard-dots">
+          <span class="dot active" data-dot="0"></span>
+          <span class="dot" data-dot="1"></span>
+          <span class="dot" data-dot="2"></span>
+          <span class="dot" data-dot="3"></span>
+        </div>
+        <div class="onboard-buttons">
+          <button id="btn-onboard-skip" class="btn">Skip</button>
+          <button id="btn-onboard-next" class="btn primary">Next</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="app">
     <header>
       <div class="logo">
@@ -23,6 +93,7 @@
         <span id="status-webcam" class="status-dot off" title="Webcam"></span>
         <span id="status-face" class="status-dot off" title="Face detected"></span>
         <span id="status-model" class="status-dot off" title="Model trained"></span>
+        <span id="quality-badge" class="quality-badge hidden" title="Tracking quality">--</span>
         <span id="status-text">Initializing...</span>
       </div>
     </header>
@@ -48,6 +119,14 @@
         <div id="progress-bar"><div id="progress-fill"></div></div>
         <span id="progress-text">0 samples collected</span>
       </div>
+      <!-- Accuracy validation result -->
+      <div id="accuracy-result" style="display:none;">
+        <div class="accuracy-display">
+          <span id="accuracy-label">Accuracy:</span>
+          <span id="accuracy-value" class="accuracy-value">--</span>
+          <span id="accuracy-detail" class="accuracy-detail"></span>
+        </div>
+      </div>
     </div>
 
     <!-- Training Section -->
@@ -55,6 +134,7 @@
       <h2>Model Training</h2>
       <div id="training-controls">
         <button id="btn-train" class="btn primary" disabled>Train Model</button>
+        <button id="btn-validate" class="btn" disabled>Validate Accuracy</button>
         <button id="btn-start-tracking" class="btn success" disabled>Start Tracking</button>
         <button id="btn-stop-tracking" class="btn danger" style="display:none;">Stop Tracking</button>
       </div>
@@ -83,6 +163,14 @@
       <div id="calibration-target" class="cal-target"></div>
       <div id="calibration-instruction">Look at the target and tap/click it</div>
       <button id="btn-cancel-calibration" class="btn danger cal-cancel">Cancel</button>
+    </div>
+
+    <!-- Validation overlay -->
+    <div id="validation-overlay" style="display:none;">
+      <div id="validation-target" class="cal-target val-target"></div>
+      <div id="validation-instruction">Look at the target (don't tap — just look)</div>
+      <div id="validation-progress">Point <span id="val-current">1</span> of <span id="val-total">5</span></div>
+      <button id="btn-cancel-validation" class="btn danger cal-cancel">Cancel</button>
     </div>
   </div>
 

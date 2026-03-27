@@ -15,6 +15,11 @@ const sessionData = new Map();
 const FIRST_VIEWED_WINDOW_MS = 5000;
 const pageLoadTimes = new Map();
 
+// Session naming and management
+let currentSessionName = '';
+let currentSessionStartTime = Date.now();
+const savedSessions = new Map(); // name -> { startTime, endTime, data }
+
 // Persistence: save critical state to chrome.storage.local so it survives SW restart
 let persistTimer = null;
 const PERSIST_INTERVAL_MS = 10000; // Save every 10s if dirty
@@ -232,6 +237,92 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
         return true;
       }
+
+      case 'NAME_SESSION':
+        if (typeof msg.name === 'string' && msg.name.trim().length > 0) {
+          currentSessionName = msg.name.trim().substring(0, 100);
+        }
+        sendResponse({ ok: true, name: currentSessionName });
+        return true;
+
+      case 'GET_SESSION_INFO':
+        sendResponse({
+          name: currentSessionName,
+          startTime: currentSessionStartTime,
+          tabCount: heatmapData.size,
+          totalGaze: [...heatmapData.values()].reduce((s, d) => s + d.gazePoints.length, 0),
+          savedSessions: [...savedSessions.entries()].map(([name, s]) => ({
+            name,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            tabCount: s.tabCount || 0,
+            totalGaze: s.totalGaze || 0,
+          })),
+        });
+        return true;
+
+      case 'SAVE_SESSION': {
+        const sessName = (typeof msg.name === 'string' && msg.name.trim()) || currentSessionName || `Session ${new Date().toLocaleString()}`;
+        const sessExport = exportAllData();
+        savedSessions.set(sessName, {
+          startTime: currentSessionStartTime,
+          endTime: Date.now(),
+          tabCount: heatmapData.size,
+          totalGaze: [...heatmapData.values()].reduce((s, d) => s + d.gazePoints.length, 0),
+          data: sessExport,
+        });
+        // Persist saved sessions
+        try {
+          const sessObj = {};
+          for (const [n, s] of savedSessions) {
+            sessObj[n] = { startTime: s.startTime, endTime: s.endTime, tabCount: s.tabCount, totalGaze: s.totalGaze };
+          }
+          chrome.storage.local.set({ _eyedSavedSessionsMeta: sessObj });
+        } catch (e) {}
+        sendResponse({ ok: true, name: sessName });
+        return true;
+      }
+
+      case 'LOAD_SESSION': {
+        const sess = savedSessions.get(msg.name);
+        if (sess?.data) {
+          sendResponse({ data: sess.data });
+        } else {
+          sendResponse({ error: 'Session not found' });
+        }
+        return true;
+      }
+
+      case 'DELETE_SESSION':
+        savedSessions.delete(msg.name);
+        try {
+          const sessObj = {};
+          for (const [n, s] of savedSessions) {
+            sessObj[n] = { startTime: s.startTime, endTime: s.endTime, tabCount: s.tabCount, totalGaze: s.totalGaze };
+          }
+          chrome.storage.local.set({ _eyedSavedSessionsMeta: sessObj });
+        } catch (e) {}
+        sendResponse({ ok: true });
+        return true;
+
+      case 'NEW_SESSION':
+        // Save current if named, then reset
+        if (currentSessionName) {
+          savedSessions.set(currentSessionName, {
+            startTime: currentSessionStartTime,
+            endTime: Date.now(),
+            tabCount: heatmapData.size,
+            totalGaze: [...heatmapData.values()].reduce((s, d) => s + d.gazePoints.length, 0),
+            data: exportAllData(),
+          });
+        }
+        heatmapData.clear();
+        sessionData.clear();
+        currentSessionName = (typeof msg.name === 'string') ? msg.name.trim().substring(0, 100) : '';
+        currentSessionStartTime = Date.now();
+        persistDirty = true;
+        sendResponse({ ok: true });
+        return true;
 
       case 'CAPTURE_SCREENSHOT':
         captureScreenshot(sender.tab?.id, sendResponse);

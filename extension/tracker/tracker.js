@@ -11,6 +11,7 @@ const state = {
   modelTrained: false,
   tracking: false,
   calibrating: false,
+  validating: false,
   autoCollecting: false,
   currentPosition: null,
   currentEyeRect: null,
@@ -24,6 +25,11 @@ const state = {
   autoMoveHandler: null,
   trackingInterval: null,
   predicting: false,
+  // Quality tracking
+  recentPredictions: [],
+  qualityScore: null,
+  // Onboarding
+  onboardStep: 0,
 };
 
 const EYE_CANVAS_W = 55;
@@ -404,6 +410,7 @@ async function trainModel() {
     setStatusText('Model trained');
     $('#training-text').textContent = 'Training complete!';
     $('#btn-start-tracking').disabled = false;
+    $('#btn-validate').disabled = false;
     $('#btn-save-model').disabled = false;
 
     chrome.runtime.sendMessage({ type: 'MODEL_READY' }).catch(() => {});
@@ -593,18 +600,27 @@ function startTracking() {
   setStatusText('Tracking active — gaze data streaming');
 
   state.trackingInterval = setInterval(async () => {
-    if (!state.tracking || !state.faceDetected || state.predicting) return;
+    if (!state.faceDetected || state.predicting) return;
+
+    // During validation, collect predictions instead of broadcasting
+    if (state.validating) {
+      collectValidationPrediction();
+      return;
+    }
+
+    if (!state.tracking) return;
 
     state.predicting = true;
     try {
       const pred = getPrediction();
       if (pred) {
+        updateQualityIndicator(pred);
         chrome.runtime.sendMessage({
           type: 'GAZE_DATA',
           x: pred.x,
           y: pred.y,
           timestamp: Date.now(),
-          confidence: 1,
+          confidence: state.qualityScore === 'good' ? 1 : state.qualityScore === 'fair' ? 0.6 : 0.3,
         }).catch(() => {});
       }
     } finally {
@@ -621,6 +637,13 @@ function stopTracking() {
     clearInterval(state.trackingInterval);
     state.trackingInterval = null;
   }
+  state.recentPredictions = [];
+  state.qualityScore = null;
+  const badge = $('#quality-badge');
+  badge.classList.add('hidden');
+  badge.classList.remove('good', 'fair', 'poor');
+  badge.textContent = '--';
+
   $('#btn-start-tracking').style.display = '';
   $('#btn-stop-tracking').style.display = 'none';
   setStatusText('Tracking stopped');
@@ -697,6 +720,7 @@ async function loadModel() {
     setStatusText('Model loaded');
     $('#training-text').textContent = 'Model loaded from storage';
     $('#btn-start-tracking').disabled = false;
+    $('#btn-validate').disabled = false;
     $('#btn-save-model').disabled = false;
     chrome.runtime.sendMessage({ type: 'MODEL_READY' }).catch(() => {});
   } catch (err) {
@@ -800,6 +824,230 @@ function resetAll() {
   tf.io.removeModel('indexeddb://eyed-model-v1').catch(() => {});
 }
 
+/* ========== CONSENT FLOW ========== */
+function initConsent() {
+  const consentOverlay = $('#consent-overlay');
+  const checkbox = $('#consent-checkbox');
+  const btnConsent = $('#btn-consent');
+  const btnDecline = $('#btn-decline');
+
+  checkbox.addEventListener('change', () => {
+    btnConsent.disabled = !checkbox.checked;
+  });
+
+  btnConsent.addEventListener('click', () => {
+    localStorage.setItem('eyed-consent', 'true');
+    consentOverlay.style.display = 'none';
+    proceedAfterConsent();
+  });
+
+  btnDecline.addEventListener('click', () => {
+    consentOverlay.style.display = 'none';
+    setStatusText('Webcam access declined — reload to try again');
+    $('#app').style.opacity = '0.5';
+    $('#app').style.pointerEvents = 'none';
+  });
+}
+
+/* ========== ONBOARDING ========== */
+function initOnboarding() {
+  const overlay = $('#onboarding-overlay');
+  const steps = overlay.querySelectorAll('.onboard-step');
+  const dots = overlay.querySelectorAll('.dot');
+  const btnNext = $('#btn-onboard-next');
+  const btnSkip = $('#btn-onboard-skip');
+
+  function showStep(idx) {
+    state.onboardStep = idx;
+    steps.forEach((s, i) => s.classList.toggle('active', i === idx));
+    dots.forEach((d, i) => d.classList.toggle('active', i === idx));
+    btnNext.textContent = idx === steps.length - 1 ? 'Get Started' : 'Next';
+  }
+
+  btnNext.addEventListener('click', () => {
+    if (state.onboardStep >= steps.length - 1) {
+      finishOnboarding();
+    } else {
+      showStep(state.onboardStep + 1);
+    }
+  });
+
+  btnSkip.addEventListener('click', finishOnboarding);
+
+  dots.forEach((dot) => {
+    dot.addEventListener('click', () => {
+      showStep(parseInt(dot.dataset.dot, 10));
+    });
+  });
+
+  function finishOnboarding() {
+    localStorage.setItem('eyed-onboarded', 'true');
+    overlay.style.display = 'none';
+  }
+}
+
+/* ========== ACCURACY VALIDATION ========== */
+const VALIDATION_POINTS = [
+  { x: 0.5, y: 0.5 },
+  { x: 0.2, y: 0.2 },
+  { x: 0.8, y: 0.2 },
+  { x: 0.2, y: 0.8 },
+  { x: 0.8, y: 0.8 },
+];
+
+let validationIndex = 0;
+let validationResults = [];
+let validationTimer = null;
+let validationPredictions = [];
+
+function startValidation() {
+  if (!state.modelTrained || !state.faceDetected) {
+    setStatusText('Need trained model and face detected to validate');
+    return;
+  }
+
+  state.validating = true;
+  validationIndex = 0;
+  validationResults = [];
+  validationPredictions = [];
+
+  $('#validation-overlay').style.display = 'flex';
+  $('#val-total').textContent = VALIDATION_POINTS.length;
+  showValidationTarget();
+}
+
+function showValidationTarget() {
+  if (validationIndex >= VALIDATION_POINTS.length) {
+    endValidation();
+    return;
+  }
+
+  const point = VALIDATION_POINTS[validationIndex];
+  const target = $('#validation-target');
+  target.style.left = (point.x * 100) + '%';
+  target.style.top = (point.y * 100) + '%';
+  $('#val-current').textContent = validationIndex + 1;
+  $('#validation-instruction').textContent = `Look at the blue target (point ${validationIndex + 1} of ${VALIDATION_POINTS.length})`;
+
+  validationPredictions = [];
+
+  // Collect predictions for 2 seconds, then move to next
+  validationTimer = setTimeout(() => {
+    // Average the collected predictions
+    if (validationPredictions.length > 0) {
+      const avgX = validationPredictions.reduce((s, p) => s + p.x, 0) / validationPredictions.length;
+      const avgY = validationPredictions.reduce((s, p) => s + p.y, 0) / validationPredictions.length;
+      validationResults.push({
+        target: point,
+        predicted: { x: avgX, y: avgY },
+        samples: validationPredictions.length,
+      });
+    }
+    validationIndex++;
+    showValidationTarget();
+  }, 2000);
+}
+
+function collectValidationPrediction() {
+  if (!state.validating || !state.faceDetected) return;
+  const pred = getPrediction();
+  if (pred) {
+    validationPredictions.push(pred);
+  }
+}
+
+function endValidation() {
+  state.validating = false;
+  if (validationTimer) { clearTimeout(validationTimer); validationTimer = null; }
+  $('#validation-overlay').style.display = 'none';
+
+  if (validationResults.length === 0) {
+    setStatusText('Validation failed — no predictions collected');
+    return;
+  }
+
+  // Compute average pixel error
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let totalError = 0;
+
+  for (const r of validationResults) {
+    const dx = (r.predicted.x - r.target.x) * vw;
+    const dy = (r.predicted.y - r.target.y) * vh;
+    totalError += Math.sqrt(dx * dx + dy * dy);
+  }
+
+  const avgError = totalError / validationResults.length;
+  const accuracyDisplay = $('#accuracy-result');
+  const accuracyValue = $('#accuracy-value');
+  const accuracyDetail = $('#accuracy-detail');
+
+  accuracyDisplay.style.display = 'block';
+
+  if (avgError < 60) {
+    accuracyValue.textContent = 'Good';
+    accuracyValue.className = 'accuracy-value';
+    accuracyDetail.textContent = `~${Math.round(avgError)}px avg error`;
+  } else if (avgError < 120) {
+    accuracyValue.textContent = 'Fair';
+    accuracyValue.className = 'accuracy-value fair';
+    accuracyDetail.textContent = `~${Math.round(avgError)}px avg error — recalibrate for better results`;
+  } else {
+    accuracyValue.textContent = 'Poor';
+    accuracyValue.className = 'accuracy-value poor';
+    accuracyDetail.textContent = `~${Math.round(avgError)}px avg error — recalibrate recommended`;
+  }
+
+  setStatusText(`Validation: ${Math.round(avgError)}px average error`);
+}
+
+function cancelValidation() {
+  state.validating = false;
+  if (validationTimer) { clearTimeout(validationTimer); validationTimer = null; }
+  $('#validation-overlay').style.display = 'none';
+  setStatusText('Validation cancelled');
+}
+
+/* ========== TRACKING QUALITY INDICATOR ========== */
+const QUALITY_WINDOW = 20; // rolling window of predictions
+
+function updateQualityIndicator(pred) {
+  state.recentPredictions.push(pred);
+  if (state.recentPredictions.length > QUALITY_WINDOW) {
+    state.recentPredictions.shift();
+  }
+
+  if (state.recentPredictions.length < 5) return;
+
+  // Compute variance of recent predictions (stability measure)
+  const preds = state.recentPredictions;
+  const avgX = preds.reduce((s, p) => s + p.x, 0) / preds.length;
+  const avgY = preds.reduce((s, p) => s + p.y, 0) / preds.length;
+  let variance = 0;
+  for (const p of preds) {
+    variance += (p.x - avgX) ** 2 + (p.y - avgY) ** 2;
+  }
+  variance /= preds.length;
+
+  const badge = $('#quality-badge');
+  badge.classList.remove('hidden', 'good', 'fair', 'poor');
+
+  // Lower variance = better quality
+  if (variance < 0.002) {
+    badge.textContent = 'Good';
+    badge.classList.add('good');
+    state.qualityScore = 'good';
+  } else if (variance < 0.008) {
+    badge.textContent = 'Fair';
+    badge.classList.add('fair');
+    state.qualityScore = 'fair';
+  } else {
+    badge.textContent = 'Poor';
+    badge.classList.add('poor');
+    state.qualityScore = 'poor';
+  }
+}
+
 /* ========== EVENT HANDLERS ========== */
 function bindEvents() {
   $('#btn-start-calibration').addEventListener('click', () => startCalibration(FULL_POINTS));
@@ -815,8 +1063,10 @@ function bindEvents() {
   });
 
   $('#btn-train').addEventListener('click', trainModel);
+  $('#btn-validate').addEventListener('click', startValidation);
   $('#btn-start-tracking').addEventListener('click', startTracking);
   $('#btn-stop-tracking').addEventListener('click', stopTracking);
+  $('#btn-cancel-validation').addEventListener('click', cancelValidation);
 
   $('#btn-save-model').addEventListener('click', saveModel);
   $('#btn-load-model').addEventListener('click', loadModel);
@@ -834,6 +1084,7 @@ function bindEvents() {
             modelTrained: state.modelTrained,
             tracking: state.tracking,
             sampleCount: state.sampleCount,
+            qualityScore: state.qualityScore,
           });
           return true;
 
@@ -861,7 +1112,17 @@ function bindEvents() {
 }
 
 /* ========== INIT ========== */
-async function init() {
+async function proceedAfterConsent() {
+  // Show onboarding if first run
+  if (!localStorage.getItem('eyed-onboarded')) {
+    $('#onboarding-overlay').style.display = 'flex';
+    initOnboarding();
+  }
+
+  await startApp();
+}
+
+async function startApp() {
   setStatusText('Loading face mesh model...');
 
   try {
@@ -882,6 +1143,17 @@ async function init() {
   }
 
   await initWebcam();
+}
+
+async function init() {
+  initConsent();
+
+  // Check if already consented
+  if (localStorage.getItem('eyed-consent')) {
+    $('#consent-overlay').style.display = 'none';
+    await proceedAfterConsent();
+  }
+  // Otherwise, consent overlay is visible — waiting for user action
 }
 
 init();
