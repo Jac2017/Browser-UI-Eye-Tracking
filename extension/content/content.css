@@ -1,6 +1,7 @@
 /* EyeD Content Script Overlay Styles */
 
-#eyed-heatmap-canvas {
+#eyed-heatmap-canvas,
+#eyed-scanpath-canvas {
   position: fixed;
   top: 0;
   left: 0;
@@ -12,7 +13,8 @@
   transition: opacity 0.3s;
 }
 
-#eyed-heatmap-canvas.hidden {
+#eyed-heatmap-canvas.hidden,
+#eyed-scanpath-canvas.hidden {
   opacity: 0;
   display: none;
 }
@@ -76,6 +78,29 @@
 @keyframes eyed-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
+}
+
+/* Video timeline bar */
+#eyed-timeline-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 32px;
+  background: rgba(13, 17, 23, 0.9);
+  border-top: 1px solid #30363d;
+  z-index: 2147483645;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  font-family: -apple-system, sans-serif;
+  font-size: 11px;
+  color: #8b949e;
+}
+
+#eyed-timeline-bar.hidden {
+  display: none;
 }
 
 /* First-viewed element highlight */

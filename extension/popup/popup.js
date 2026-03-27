@@ -7,7 +7,6 @@ const $ = (sel) => document.querySelector(sel);
 
 /* ========== STATUS UPDATE ========== */
 async function updateStatus() {
-  // Get tracking state from background
   try {
     const bgState = await chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' });
 
@@ -35,29 +34,26 @@ async function updateStatus() {
       $('#btn-start').disabled = true;
       $('#btn-stop').disabled = true;
     }
-  } catch (e) {
-    // Background not available
-  }
+  } catch (e) {}
 
-  // Get content script state from active tab
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
       const contentState = await chrome.tabs.sendMessage(tab.id, { type: 'GET_CONTENT_STATE' });
       if (contentState) {
-        const total = contentState.gazePointCount + contentState.mousePointCount + contentState.touchPointCount;
         const parts = [];
         if (contentState.gazePointCount > 0) parts.push(`${contentState.gazePointCount} gaze`);
         if (contentState.mousePointCount > 0) parts.push(`${contentState.mousePointCount} mouse`);
         if (contentState.touchPointCount > 0) parts.push(`${contentState.touchPointCount} touch`);
         if (contentState.firstViewedCount > 0) parts.push(`${contentState.firstViewedCount} first-viewed`);
+        if (contentState.fixationCount > 0) parts.push(`${contentState.fixationCount} fixations`);
 
+        const total = contentState.gazePointCount + contentState.mousePointCount + contentState.touchPointCount;
         $('#page-stats').textContent = total > 0 ? parts.join(', ') : 'No data';
         $('#page-stats').className = total > 0 ? 'status-value active' : 'status-value off';
       }
     }
   } catch (e) {
-    // Content script not available on this page
     $('#page-stats').textContent = 'N/A (system page)';
     $('#page-stats').className = 'status-value off';
   }
@@ -69,26 +65,30 @@ $('#btn-open-tracker').addEventListener('click', async () => {
   window.close();
 });
 
+$('#btn-open-insights').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_INSIGHTS' });
+  window.close();
+});
+
 $('#btn-toggle-heatmap').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_HEATMAP' });
-    }
-  } catch (e) {
-    // Content script not available
-  }
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_HEATMAP' });
+  } catch (e) {}
+});
+
+$('#btn-toggle-scanpath').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SCANPATH' });
+  } catch (e) {}
 });
 
 $('#btn-toggle-cursor').addEventListener('click', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_CURSOR' });
-    }
-  } catch (e) {
-    // Content script not available
-  }
+    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_CURSOR' });
+  } catch (e) {}
 });
 
 $('#btn-start').addEventListener('click', async () => {
@@ -98,9 +98,7 @@ $('#btn-start').addEventListener('click', async () => {
       await chrome.tabs.sendMessage(bgState.trackerTabId, { type: 'START_TRACKING' });
       setTimeout(updateStatus, 500);
     }
-  } catch (e) {
-    // Tracker tab not available
-  }
+  } catch (e) {}
 });
 
 $('#btn-stop').addEventListener('click', async () => {
@@ -110,9 +108,39 @@ $('#btn-stop').addEventListener('click', async () => {
       await chrome.tabs.sendMessage(bgState.trackerTabId, { type: 'STOP_TRACKING' });
       setTimeout(updateStatus, 500);
     }
-  } catch (e) {
-    // Tracker tab not available
-  }
+  } catch (e) {}
+});
+
+$('#btn-screenshot-viewport').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      await chrome.tabs.sendMessage(tab.id, {
+        type: 'CAPTURE_VIEWPORT_SCREENSHOT',
+        download: true,
+        includeHeatmap: true,
+        includeScanpath: true,
+        includeFirstViewed: true,
+      });
+    }
+  } catch (e) {}
+});
+
+$('#btn-screenshot-fullpage').addEventListener('click', async () => {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      // Close popup so it doesn't appear in screenshots
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'CAPTURE_FULLPAGE_SCREENSHOT',
+        download: true,
+        includeHeatmap: true,
+        includeScanpath: true,
+        includeFirstViewed: true,
+      });
+      window.close();
+    }
+  } catch (e) {}
 });
 
 $('#btn-export').addEventListener('click', async () => {
@@ -136,12 +164,9 @@ $('#btn-clear').addEventListener('click', async () => {
       await chrome.runtime.sendMessage({ type: 'CLEAR_HEATMAP', tabId: tab.id });
       updateStatus();
     }
-  } catch (e) {
-    // Content script not available
-  }
+  } catch (e) {}
 });
 
 /* ========== INIT ========== */
 updateStatus();
-// Refresh status periodically while popup is open
 setInterval(updateStatus, 2000);

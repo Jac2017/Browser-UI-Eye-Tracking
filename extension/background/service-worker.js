@@ -1,7 +1,8 @@
 /**
  * EyeD Background Service Worker
  * Coordinates gaze data from tracker tab to content scripts on all tabs.
- * Manages session state, heatmap data, and first-viewed element tracking.
+ * Manages session state, heatmap data, first-viewed element tracking,
+ * screenshot capture, and analytics data routing.
  */
 
 /* ========== STATE ========== */
@@ -9,19 +10,11 @@ let trackerTabId = null;
 let trackingActive = false;
 let modelReady = false;
 
-// Heatmap data stored per tab/URL
-// Key: tabId, Value: { url, gazePoints[], touchPoints[], mousePoints[], firstViewed[] }
 const heatmapData = new Map();
-
-// Session-level aggregate data keyed by URL
 const sessionData = new Map();
-
-// Track which tabs are newly loaded (for first-viewed detection)
 const newPageTabs = new Set();
-
-// First-viewed tracking: after page load, first N gaze points are tagged
-const FIRST_VIEWED_WINDOW_MS = 5000; // 5 seconds after page load
-const pageLoadTimes = new Map(); // tabId -> timestamp
+const FIRST_VIEWED_WINDOW_MS = 5000;
+const pageLoadTimes = new Map();
 
 /* ========== HELPERS ========== */
 function getTabData(tabId) {
@@ -32,6 +25,7 @@ function getTabData(tabId) {
       touchPoints: [],
       mousePoints: [],
       firstViewedPoints: [],
+      scrollEvents: [],
     });
   }
   return heatmapData.get(tabId);
@@ -71,6 +65,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       handleInputData(msg, sender.tab?.id);
       break;
 
+    case 'SCROLL_EVENT':
+      if (sender.tab) {
+        const data = getTabData(sender.tab.id);
+        data.scrollEvents.push({
+          scrollX: msg.scrollX,
+          scrollY: msg.scrollY,
+          pageHeight: msg.pageHeight,
+          viewHeight: msg.viewHeight,
+          timestamp: msg.timestamp,
+        });
+      }
+      break;
+
     case 'GET_HEATMAP_DATA':
       sendResponse(getHeatmapDataForTab(msg.tabId || sender.tab?.id));
       return true;
@@ -89,13 +96,42 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: true });
       return true;
 
+    case 'OPEN_INSIGHTS':
+      openInsightsTab();
+      sendResponse({ ok: true });
+      return true;
+
     case 'GET_ALL_SESSION_DATA':
       sendResponse({ data: Object.fromEntries(sessionData) });
       return true;
 
+    case 'GET_ALL_TAB_DATA': {
+      const tabs = [];
+      for (const [tabId, data] of heatmapData) {
+        tabs.push({
+          tabId,
+          url: data.url,
+          gazeCount: data.gazePoints.length,
+          mouseCount: data.mousePoints.length,
+          touchCount: data.touchPoints.length,
+          firstViewedCount: data.firstViewedPoints.length,
+        });
+      }
+      sendResponse({ tabs });
+      return true;
+    }
+
     case 'EXPORT_SESSION':
       sendResponse({ data: exportAllData() });
       return true;
+
+    case 'CAPTURE_SCREENSHOT':
+      captureScreenshot(sender.tab?.id, sendResponse);
+      return true;
+
+    case 'SCREENSHOT_PROGRESS':
+      // Could forward to popup/insights for progress display
+      break;
   }
 });
 
@@ -103,7 +139,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 function handleGazeData(msg) {
   if (!trackingActive) return;
 
-  // Forward gaze data to all content scripts (except tracker tab)
   broadcastToContentScripts({
     type: 'GAZE_POINT',
     x: msg.x,
@@ -117,7 +152,11 @@ function handleInputData(msg, tabId) {
   if (!tabId) return;
 
   const data = getTabData(tabId);
-  const point = { x: msg.x, y: msg.y, timestamp: msg.timestamp };
+  const point = {
+    x: msg.x, y: msg.y,
+    pageX: msg.pageX, pageY: msg.pageY,
+    timestamp: msg.timestamp,
+  };
 
   if (msg.type === 'TOUCH_DATA') {
     data.touchPoints.push(point);
@@ -129,14 +168,10 @@ function handleInputData(msg, tabId) {
 function broadcastToContentScripts(message) {
   chrome.tabs.query({}, (tabs) => {
     for (const tab of tabs) {
-      // Skip the tracker tab
       if (tab.id === trackerTabId) continue;
-      // Skip chrome:// and extension pages
       if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) continue;
 
-      chrome.tabs.sendMessage(tab.id, message).catch(() => {
-        // Tab might not have content script loaded
-      });
+      chrome.tabs.sendMessage(tab.id, message).catch(() => {});
     }
   });
 }
@@ -144,19 +179,19 @@ function broadcastToContentScripts(message) {
 /* ========== HEATMAP DATA ========== */
 function getHeatmapDataForTab(tabId) {
   const data = heatmapData.get(tabId);
-  if (!data) return { gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [] };
+  if (!data) return { gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [], scrollEvents: [] };
   return {
+    url: data.url,
     gazePoints: data.gazePoints,
     touchPoints: data.touchPoints,
     mousePoints: data.mousePoints,
     firstViewedPoints: data.firstViewedPoints,
+    scrollEvents: data.scrollEvents,
   };
 }
 
 function clearHeatmapData(tabId) {
-  if (tabId) {
-    heatmapData.delete(tabId);
-  }
+  if (tabId) heatmapData.delete(tabId);
 }
 
 function exportAllData() {
@@ -171,29 +206,54 @@ function exportAllData() {
   };
 }
 
+/* ========== SCREENSHOT CAPTURE ========== */
+function captureScreenshot(tabId, sendResponse) {
+  // Find the window containing the requesting tab
+  if (tabId) {
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError || !tab) {
+        sendResponse({ error: 'Tab not found' });
+        return;
+      }
+
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' }, (dataUrl) => {
+        if (chrome.runtime.lastError) {
+          sendResponse({ error: chrome.runtime.lastError.message });
+          return;
+        }
+        sendResponse({ dataUrl });
+      });
+    });
+  } else {
+    chrome.tabs.captureVisibleTab(null, { format: 'png' }, (dataUrl) => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ error: chrome.runtime.lastError.message });
+        return;
+      }
+      sendResponse({ dataUrl });
+    });
+  }
+}
+
 /* ========== TAB LIFECYCLE ========== */
-// Track new page loads for first-viewed detection
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === 'complete' && tab.url) {
-    // Mark tab as newly loaded
     pageLoadTimes.set(tabId, Date.now());
     newPageTabs.add(tabId);
 
-    // Initialize fresh heatmap data for this tab
     const data = getTabData(tabId);
     data.url = tab.url;
     data.gazePoints = [];
     data.touchPoints = [];
     data.mousePoints = [];
     data.firstViewedPoints = [];
+    data.scrollEvents = [];
 
-    // Notify content script about new page
     chrome.tabs.sendMessage(tabId, {
       type: 'NEW_PAGE_LOADED',
       timestamp: Date.now(),
     }).catch(() => {});
 
-    // Clear first-viewed window after timeout
     setTimeout(() => {
       newPageTabs.delete(tabId);
       pageLoadTimes.delete(tabId);
@@ -201,16 +261,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
-// Clean up when tabs close
 chrome.tabs.onRemoved.addListener((tabId) => {
-  // Save data to session before removing
   const data = heatmapData.get(tabId);
   if (data && data.url && data.gazePoints.length > 0) {
-    const existing = sessionData.get(data.url) || { gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [] };
+    const existing = sessionData.get(data.url) || {
+      gazePoints: [], touchPoints: [], mousePoints: [], firstViewedPoints: [], scrollEvents: []
+    };
     existing.gazePoints.push(...data.gazePoints);
     existing.touchPoints.push(...data.touchPoints);
     existing.mousePoints.push(...data.mousePoints);
     existing.firstViewedPoints.push(...data.firstViewedPoints);
+    if (data.scrollEvents) existing.scrollEvents.push(...data.scrollEvents);
     sessionData.set(data.url, existing);
   }
 
@@ -219,11 +280,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   pageLoadTimes.delete(tabId);
 });
 
-/* ========== TRACKER TAB ========== */
+/* ========== TRACKER / INSIGHTS TABS ========== */
 function openTrackerTab() {
   const trackerUrl = chrome.runtime.getURL('tracker/tracker.html');
-
-  // Check if tracker tab already exists
   chrome.tabs.query({ url: trackerUrl }, (tabs) => {
     if (tabs.length > 0) {
       chrome.tabs.update(tabs[0].id, { active: true });
@@ -235,7 +294,18 @@ function openTrackerTab() {
   });
 }
 
-/* ========== EXTENSION ICON BADGE ========== */
+function openInsightsTab() {
+  const insightsUrl = chrome.runtime.getURL('insights/insights.html');
+  chrome.tabs.query({ url: insightsUrl }, (tabs) => {
+    if (tabs.length > 0) {
+      chrome.tabs.update(tabs[0].id, { active: true });
+    } else {
+      chrome.tabs.create({ url: insightsUrl });
+    }
+  });
+}
+
+/* ========== BADGE ========== */
 function updateBadge() {
   const text = trackingActive ? 'ON' : '';
   const color = trackingActive ? '#238636' : '#484f58';
@@ -243,30 +313,32 @@ function updateBadge() {
   chrome.action.setBadgeBackgroundColor({ color });
 }
 
-// Periodically update badge
 setInterval(updateBadge, 2000);
 
 /* ========== STORE GAZE POINTS PER TAB ========== */
-// Listen for content scripts reporting their stored gaze data
 chrome.runtime.onMessage.addListener((msg, sender) => {
   if (msg.type === 'STORE_GAZE_POINT' && sender.tab) {
     const tabId = sender.tab.id;
     const data = getTabData(tabId);
 
-    const point = { x: msg.x, y: msg.y, timestamp: msg.timestamp };
+    const point = {
+      x: msg.x, y: msg.y,
+      pageX: msg.pageX, pageY: msg.pageY,
+      scrollX: msg.scrollX, scrollY: msg.scrollY,
+      timestamp: msg.timestamp,
+      videoTime: msg.videoTime,
+      onVideo: msg.onVideo,
+    };
+
     data.gazePoints.push(point);
 
-    // Check if this is in the first-viewed window
     if (isFirstViewedWindow(tabId)) {
       data.firstViewedPoints.push(point);
     }
 
-    // Also store in URL-keyed session data
     const url = sender.tab.url;
-    if (url) {
-      data.url = url;
-    }
+    if (url) data.url = url;
   }
 });
 
-console.log('EyeD service worker initialized');
+console.log('EyeD service worker v1.1 initialized');
