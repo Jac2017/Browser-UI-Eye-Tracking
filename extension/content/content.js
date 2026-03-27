@@ -87,6 +87,9 @@
   }
 
   /* ========== ENRICHED POINT CREATION ========== */
+  // Allowed extra properties for createPoint (whitelist prevents prototype pollution)
+  const POINT_EXTRA_KEYS = ['isBrowserUI', 'timestamp'];
+
   function createPoint(x, y, extras = {}) {
     const viewW = window.innerWidth;
     const viewH = window.innerHeight;
@@ -97,8 +100,10 @@
       scrollX: window.scrollX,
       scrollY: window.scrollY,
       timestamp: extras.timestamp || Date.now(),
-      ...extras,
     };
+    for (const key of POINT_EXTRA_KEYS) {
+      if (key in extras) point[key] = extras[key];
+    }
 
     // Enrich with video time if video is playing
     if (typeof EyedVideoTracker !== 'undefined') {

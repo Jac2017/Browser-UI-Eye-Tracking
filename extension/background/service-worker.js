@@ -20,6 +20,8 @@ let persistTimer = null;
 const PERSIST_INTERVAL_MS = 10000; // Save every 10s if dirty
 let persistDirty = false;
 
+const PERSIST_QUOTA_LIMIT = 8 * 1024 * 1024; // 8MB safety limit
+
 async function persistState() {
   if (!persistDirty) return;
   try {
@@ -27,13 +29,28 @@ async function persistState() {
     for (const [tabId, data] of heatmapData) {
       serializable[tabId] = data;
     }
-    await chrome.storage.local.set({
+    const payload = {
       _eyedHeatmapData: serializable,
       _eyedSessionData: Object.fromEntries(sessionData),
       _eyedTrackingActive: trackingActive,
       _eyedTrackerTabId: trackerTabId,
       _eyedModelReady: modelReady,
-    });
+    };
+    // Estimate size and guard against quota overflow
+    const estimate = JSON.stringify(payload).length;
+    if (estimate > PERSIST_QUOTA_LIMIT) {
+      console.warn('EyeD persist skipped: payload too large (' + Math.round(estimate / 1024) + 'KB)');
+      // Trim oldest tab data to fit
+      const tabIds = [...heatmapData.keys()];
+      while (tabIds.length > 1) {
+        const oldest = tabIds.shift();
+        heatmapData.delete(oldest);
+        delete serializable[oldest];
+        payload._eyedHeatmapData = serializable;
+        if (JSON.stringify(payload).length <= PERSIST_QUOTA_LIMIT) break;
+      }
+    }
+    await chrome.storage.local.set(payload);
     persistDirty = false;
   } catch (e) {
     console.warn('EyeD persist error:', e);
@@ -46,19 +63,24 @@ async function restoreState() {
       '_eyedHeatmapData', '_eyedSessionData',
       '_eyedTrackingActive', '_eyedTrackerTabId', '_eyedModelReady',
     ]);
-    if (stored._eyedHeatmapData) {
-      for (const [tabId, data] of Object.entries(stored._eyedHeatmapData)) {
-        heatmapData.set(parseInt(tabId) || tabId, data);
+    if (stored._eyedHeatmapData && typeof stored._eyedHeatmapData === 'object') {
+      for (const [tabIdStr, data] of Object.entries(stored._eyedHeatmapData)) {
+        const tabId = parseInt(tabIdStr, 10);
+        if (Number.isInteger(tabId) && tabId > 0 && data && typeof data === 'object') {
+          heatmapData.set(tabId, data);
+        }
       }
     }
-    if (stored._eyedSessionData) {
+    if (stored._eyedSessionData && typeof stored._eyedSessionData === 'object') {
       for (const [url, data] of Object.entries(stored._eyedSessionData)) {
-        sessionData.set(url, data);
+        if (typeof url === 'string' && url.length > 0 && data && typeof data === 'object') {
+          sessionData.set(url, data);
+        }
       }
     }
-    if (stored._eyedTrackingActive) trackingActive = stored._eyedTrackingActive;
-    if (stored._eyedTrackerTabId) trackerTabId = stored._eyedTrackerTabId;
-    if (stored._eyedModelReady) modelReady = stored._eyedModelReady;
+    if (stored._eyedTrackingActive === true) trackingActive = true;
+    if (typeof stored._eyedTrackerTabId === 'number') trackerTabId = stored._eyedTrackerTabId;
+    if (stored._eyedModelReady === true) modelReady = true;
   } catch (e) {
     console.warn('EyeD restore error:', e);
   }
@@ -80,6 +102,9 @@ const MAX_GAZE_POINTS_PER_TAB = 50000;
 const MAX_INPUT_POINTS_PER_TAB = 20000;
 
 /* ========== HELPERS ========== */
+/** Validate that a value is a finite number (rejects NaN, Infinity, non-numbers) */
+function isNum(v) { return typeof v === 'number' && isFinite(v); }
+
 function getTabData(tabId) {
   if (!heatmapData.has(tabId)) {
     heatmapData.set(tabId, {
@@ -227,6 +252,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 /* ========== GAZE DATA DISTRIBUTION ========== */
 function handleGazeData(msg) {
   if (!trackingActive) return;
+  // Validate numeric inputs
+  if (!isNum(msg.x) || !isNum(msg.y) || !isNum(msg.timestamp)) return;
 
   const now = Date.now();
   const gazeMsg = {
@@ -234,7 +261,7 @@ function handleGazeData(msg) {
     x: msg.x,
     y: msg.y,
     timestamp: msg.timestamp,
-    confidence: msg.confidence,
+    confidence: isNum(msg.confidence) ? msg.confidence : 0,
   };
 
   // Rate-limit broadcasts to prevent spamming tabs
@@ -278,17 +305,21 @@ function handleInputData(msg, tabId) {
 
 function handleStoreGazePoint(msg, sender) {
   if (!sender.tab) return;
+  // Validate required numeric fields
+  if (!isNum(msg.x) || !isNum(msg.y) || !isNum(msg.timestamp)) return;
 
   const tabId = sender.tab.id;
   const data = getTabData(tabId);
 
   const point = {
     x: msg.x, y: msg.y,
-    pageX: msg.pageX, pageY: msg.pageY,
-    scrollX: msg.scrollX, scrollY: msg.scrollY,
+    pageX: isNum(msg.pageX) ? msg.pageX : null,
+    pageY: isNum(msg.pageY) ? msg.pageY : null,
+    scrollX: isNum(msg.scrollX) ? msg.scrollX : 0,
+    scrollY: isNum(msg.scrollY) ? msg.scrollY : 0,
     timestamp: msg.timestamp,
-    videoTime: msg.videoTime || null,
-    onVideo: msg.onVideo || false,
+    videoTime: isNum(msg.videoTime) ? msg.videoTime : null,
+    onVideo: msg.onVideo === true,
   };
 
   data.gazePoints.push(point);

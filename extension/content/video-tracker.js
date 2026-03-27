@@ -154,6 +154,7 @@ const EyedVideoTracker = (() => {
    * @param {number} bucketSize - seconds per bucket
    */
   function bucketByVideoTime(points, bucketSize = 5) {
+    if (!bucketSize || bucketSize <= 0 || !isFinite(bucketSize)) bucketSize = 5;
     const buckets = {};
     for (const p of points) {
       if (p.videoTime == null) continue;
@@ -171,6 +172,7 @@ const EyedVideoTracker = (() => {
    */
   function generateVideoAttentionTimeline(points, duration, bucketSize = 2) {
     if (!duration || duration === 0) return [];
+    if (!bucketSize || bucketSize <= 0 || !isFinite(bucketSize)) bucketSize = 2;
 
     const timeline = [];
     for (let t = 0; t < duration; t += bucketSize) {

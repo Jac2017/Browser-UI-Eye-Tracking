@@ -45,15 +45,11 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": [
-        "tracker/tracker.html", "tracker/tracker.css", "tracker/tracker.js",
-        "insights/insights.html", "insights/insights.css", "insights/insights.js",
-        "lib/*", "icons/*"
-      ],
+      "resources": ["icons/*"],
       "matches": ["<all_urls>"]
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' https://cdn.jsdelivr.net https://unpkg.com https://cdnjs.cloudflare.com; object-src 'self'"
+    "extension_pages": "script-src 'self' https://cdn.jsdelivr.net/npm/@tensorflow/ https://cdn.jsdelivr.net/npm/@mediapipe/; object-src 'self'"
   }
 }

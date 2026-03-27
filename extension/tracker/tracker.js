@@ -649,7 +649,14 @@ async function saveModel() {
   }
 }
 
+let modelLoadInProgress = false;
+
 async function loadModel() {
+  if (modelLoadInProgress) {
+    setStatusText('Model load already in progress');
+    return;
+  }
+  modelLoadInProgress = true;
   try {
     const loadedModel = await tf.loadLayersModel('indexeddb://eyed-model-v1');
     loadedModel.compile({ optimizer: tf.train.adam(0.001), loss: 'meanSquaredError' });
@@ -664,12 +671,14 @@ async function loadModel() {
     testOut.dispose();
 
     if (shape[1] !== 2) {
+      loadedModel.dispose();
       throw new Error('Incompatible model version');
     }
 
-    // Replace existing model
-    if (state.model) state.model.dispose();
+    // Replace existing model atomically
+    const oldModel = state.model;
     state.model = loadedModel;
+    if (oldModel) oldModel.dispose();
 
     const result = await chrome.storage.local.get(['eyedDataset', 'eyedSampleCount']);
     if (result.eyedDataset) {
@@ -698,6 +707,8 @@ async function loadModel() {
     }
     console.error('Load error:', err);
     setStatusText('No saved model found');
+  } finally {
+    modelLoadInProgress = false;
   }
 }
 
@@ -735,17 +746,19 @@ function importData() {
           return;
         }
 
-        // Validate individual samples
-        const validTrain = data.samples.train.filter(s =>
-          s.image && s.image.length === EYE_CANVAS_W * EYE_CANVAS_H &&
-          s.meta && s.meta.length === 4 &&
-          s.target && s.target.length === 2
-        );
-        const validVal = data.samples.val.filter(s =>
-          s.image && s.image.length === EYE_CANVAS_W * EYE_CANVAS_H &&
-          s.meta && s.meta.length === 4 &&
-          s.target && s.target.length === 2
-        );
+        // Validate individual samples (including NaN/Infinity checks to prevent tensor corruption)
+        function isValidSample(s) {
+          if (!Array.isArray(s.image) || s.image.length !== EYE_CANVAS_W * EYE_CANVAS_H) return false;
+          if (!Array.isArray(s.meta) || s.meta.length !== 4) return false;
+          if (!Array.isArray(s.target) || s.target.length !== 2) return false;
+          // Reject NaN/Infinity values that would corrupt training
+          for (const v of s.image) { if (typeof v !== 'number' || !isFinite(v)) return false; }
+          for (const v of s.meta) { if (typeof v !== 'number' || !isFinite(v)) return false; }
+          for (const v of s.target) { if (typeof v !== 'number' || !isFinite(v) || v < 0 || v > 1) return false; }
+          return true;
+        }
+        const validTrain = data.samples.train.filter(isValidSample);
+        const validVal = data.samples.val.filter(isValidSample);
 
         state.samples = { train: validTrain, val: validVal };
         state.sampleCount = validTrain.length + validVal.length;
