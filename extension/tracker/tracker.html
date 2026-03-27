@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EyeD - Eye Tracker</title>
+  <link rel="stylesheet" href="tracker.css">
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
+  <!-- MediaPipe Face Mesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <img src="../icons/icon48.png" alt="EyeD">
+        <h1>EyeD Tracker</h1>
+      </div>
+      <div id="status-bar">
+        <span id="status-webcam" class="status-dot off" title="Webcam"></span>
+        <span id="status-face" class="status-dot off" title="Face detected"></span>
+        <span id="status-model" class="status-dot off" title="Model trained"></span>
+        <span id="status-text">Initializing...</span>
+      </div>
+    </header>
+
+    <!-- Webcam + Eye Preview -->
+    <div id="video-container">
+      <video id="webcam" playsinline autoplay muted></video>
+      <canvas id="overlay" width="640" height="480"></canvas>
+      <canvas id="eyes" width="55" height="25" style="display:none;"></canvas>
+    </div>
+
+    <!-- Calibration Section -->
+    <div id="calibration-section" class="section">
+      <h2>Calibration</h2>
+      <p id="calibration-info">Look at each target and tap/click it. More points = better accuracy.</p>
+      <div id="calibration-controls">
+        <button id="btn-start-calibration" class="btn primary">Start Calibration</button>
+        <button id="btn-quick-calibrate" class="btn">Quick (5 points)</button>
+        <button id="btn-full-calibrate" class="btn">Full (13 points)</button>
+        <button id="btn-auto-collect" class="btn">Auto-Collect</button>
+      </div>
+      <div id="calibration-progress">
+        <div id="progress-bar"><div id="progress-fill"></div></div>
+        <span id="progress-text">0 samples collected</span>
+      </div>
+    </div>
+
+    <!-- Training Section -->
+    <div id="training-section" class="section">
+      <h2>Model Training</h2>
+      <div id="training-controls">
+        <button id="btn-train" class="btn primary" disabled>Train Model</button>
+        <button id="btn-start-tracking" class="btn success" disabled>Start Tracking</button>
+        <button id="btn-stop-tracking" class="btn danger" style="display:none;">Stop Tracking</button>
+      </div>
+      <div id="training-status">
+        <span id="training-text">Collect calibration data first</span>
+        <div id="loss-display" style="display:none;">
+          Loss: <span id="loss-value">-</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Management -->
+    <div id="data-section" class="section">
+      <h2>Data</h2>
+      <div class="btn-row">
+        <button id="btn-save-model" class="btn" disabled>Save Model</button>
+        <button id="btn-load-model" class="btn">Load Model</button>
+        <button id="btn-save-data" class="btn">Export Data</button>
+        <button id="btn-load-data" class="btn">Import Data</button>
+        <button id="btn-reset" class="btn danger">Reset All</button>
+      </div>
+    </div>
+
+    <!-- Fullscreen calibration overlay -->
+    <div id="calibration-overlay" style="display:none;">
+      <div id="calibration-target" class="cal-target"></div>
+      <div id="calibration-instruction">Look at the target and tap/click it</div>
+      <button id="btn-cancel-calibration" class="btn danger cal-cancel">Cancel</button>
+    </div>
+  </div>
+
+  <script src="tracker.js"></script>
+</body>
+</html>

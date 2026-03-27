@@ -1,0 +1,141 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  width: 300px;
+  min-height: 100px;
+}
+
+#popup {
+  padding: 12px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 10px;
+}
+
+.logo-icon {
+  width: 32px;
+  height: 32px;
+}
+
+.header-text {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+h1 {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: #58a6ff;
+}
+
+#version {
+  font-size: 0.7rem;
+  color: #484f58;
+}
+
+.section {
+  margin-bottom: 10px;
+}
+
+.section h2 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 0.82rem;
+}
+
+.status-label {
+  color: #8b949e;
+}
+
+.status-value {
+  font-weight: 500;
+}
+
+.status-value.on {
+  color: #3fb950;
+}
+
+.status-value.off {
+  color: #484f58;
+}
+
+.status-value.active {
+  color: #58a6ff;
+}
+
+.btn {
+  padding: 7px 12px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: center;
+}
+
+.btn:hover { background: #30363d; border-color: #58a6ff; }
+.btn:active { background: #388bfd33; }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.btn.primary:hover { background: #388bfd; }
+
+.btn.success { background: #238636; border-color: #238636; color: #fff; }
+.btn.success:hover { background: #2ea043; }
+
+.btn.danger { background: #da3633; border-color: #da3633; color: #fff; }
+.btn.danger:hover { background: #f85149; }
+
+.btn.danger-outline { background: transparent; border-color: #da3633; color: #f85149; }
+.btn.danger-outline:hover { background: #da363322; }
+
+.btn.full-width {
+  display: block;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.btn-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+#info-section.small p {
+  font-size: 0.72rem;
+  color: #484f58;
+  line-height: 1.4;
+  margin-bottom: 2px;
+}
+
+.orange {
+  color: #ffa500;
+  font-weight: 600;
+}

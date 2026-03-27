@@ -1,0 +1,252 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+#app {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo img {
+  width: 36px;
+  height: 36px;
+}
+
+.logo h1 {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: #58a6ff;
+}
+
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background 0.3s;
+}
+
+.status-dot.off { background: #484f58; }
+.status-dot.on { background: #3fb950; }
+.status-dot.warn { background: #d29922; }
+.status-dot.error { background: #f85149; }
+
+#video-container {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto 16px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #161b22;
+  aspect-ratio: 4/3;
+}
+
+#webcam {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+#overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform: scaleX(-1);
+  pointer-events: none;
+}
+
+.section {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.section h2 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #58a6ff;
+}
+
+.section p {
+  font-size: 0.85rem;
+  color: #8b949e;
+  margin-bottom: 10px;
+}
+
+.btn {
+  padding: 8px 16px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e6edf3;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  touch-action: manipulation;
+}
+
+.btn:hover { background: #30363d; border-color: #58a6ff; }
+.btn:active { background: #388bfd33; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+.btn.primary:hover { background: #388bfd; }
+
+.btn.success { background: #238636; border-color: #238636; color: #fff; }
+.btn.success:hover { background: #2ea043; }
+
+.btn.danger { background: #da3633; border-color: #da3633; color: #fff; }
+.btn.danger:hover { background: #f85149; }
+
+#calibration-controls, .btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+#calibration-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+#progress-bar {
+  flex: 1;
+  height: 6px;
+  background: #30363d;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+#progress-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #1f6feb, #58a6ff);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+#progress-text {
+  font-size: 0.8rem;
+  color: #8b949e;
+  white-space: nowrap;
+}
+
+#training-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+#training-status {
+  font-size: 0.85rem;
+  color: #8b949e;
+}
+
+#loss-display {
+  margin-top: 4px;
+  font-family: monospace;
+}
+
+/* Calibration Overlay */
+#calibration-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cal-target {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ff4444 30%, #ff444466 60%, transparent 70%);
+  border: 2px solid #ff6666;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  animation: cal-pulse 1.5s ease-in-out infinite;
+  touch-action: manipulation;
+}
+
+@keyframes cal-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.5); }
+  50% { box-shadow: 0 0 0 15px rgba(255, 68, 68, 0); }
+}
+
+#calibration-instruction {
+  position: absolute;
+  bottom: 60px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 1rem;
+  color: #e6edf3;
+  text-align: center;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 8px;
+}
+
+.cal-cancel {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  #app { padding: 8px; }
+  header { flex-direction: column; align-items: flex-start; }
+  .btn { padding: 10px 14px; font-size: 0.9rem; }
+  .cal-target { width: 50px; height: 50px; }
+}
