@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EyeD Dashboard</title>
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+  <div class="header">
+    <h1>EyeD Dashboard</h1>
+    <div>
+      <span class="badge" id="ws-status">Connecting...</span>
+    </div>
+  </div>
+
+  <div class="container">
+    <div class="tabs">
+      <div class="tab active" data-tab="overview">Overview</div>
+      <div class="tab" data-tab="sessions">Sessions</div>
+      <div class="tab" data-tab="analytics">Analytics</div>
+      <div class="tab" data-tab="studies">Studies</div>
+      <div class="tab" data-tab="keys">API Keys</div>
+      <div class="tab" data-tab="webhooks">Webhooks</div>
+      <div class="tab" data-tab="live">Live Feed</div>
+    </div>
+
+    <!-- Overview Tab -->
+    <div class="tab-content active" id="tab-overview">
+      <div class="card-grid" id="overview-cards"></div>
+      <h3 style="margin-bottom:12px">Event Distribution</h3>
+      <div class="card" id="event-dist" style="margin-bottom:24px"></div>
+      <h3 style="margin-bottom:12px">Recent Sessions</h3>
+      <div class="table-wrap" id="recent-sessions"></div>
+    </div>
+
+    <!-- Sessions Tab -->
+    <div class="tab-content" id="tab-sessions">
+      <div class="btn-row">
+        <button class="btn" onclick="loadSessions()">Refresh</button>
+        <select id="session-format" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
+          <option value="json">Export JSON</option>
+          <option value="csv">Export CSV</option>
+        </select>
+        <button class="btn" onclick="exportSessions()">Export All</button>
+      </div>
+      <div class="table-wrap" id="sessions-table"></div>
+    </div>
+
+    <!-- Analytics Tab -->
+    <div class="tab-content" id="tab-analytics">
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Session ID</label>
+          <select id="analytics-session" onchange="loadAnalytics()"></select>
+        </div>
+        <div class="form-group">
+          <label>Analysis Type</label>
+          <select id="analytics-type" onchange="loadAnalytics()">
+            <option value="summary">Full Summary</option>
+            <option value="heatmap">Heatmap</option>
+            <option value="fixations">Fixations</option>
+            <option value="engagement">Engagement</option>
+            <option value="timeline">Timeline</option>
+          </select>
+        </div>
+      </div>
+      <div id="analytics-result"></div>
+
+      <h3 style="margin:24px 0 12px">Funnel Analysis</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-group">
+          <label>URLs (one per line, in order)</label>
+          <textarea id="funnel-urls" rows="4" placeholder="/landing&#10;/pricing&#10;/signup&#10;/dashboard"></textarea>
+        </div>
+        <button class="btn primary" onclick="runFunnel()">Analyze Funnel</button>
+        <div id="funnel-result" style="margin-top:16px"></div>
+      </div>
+
+      <h3 style="margin:24px 0 12px">Page Comparison</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-row">
+          <div class="form-group"><label>Page A URL</label><input id="compare-url1" placeholder="/page-a"></div>
+          <div class="form-group"><label>Page B URL</label><input id="compare-url2" placeholder="/page-b"></div>
+        </div>
+        <button class="btn primary" onclick="runComparison()">Compare</button>
+        <div id="compare-result" style="margin-top:16px"></div>
+      </div>
+    </div>
+
+    <!-- Studies Tab -->
+    <div class="tab-content" id="tab-studies">
+      <div class="btn-row">
+        <button class="btn primary" onclick="showCreateStudy()">New Study</button>
+        <button class="btn" onclick="loadStudies()">Refresh</button>
+      </div>
+      <div class="table-wrap" id="studies-table"></div>
+    </div>
+
+    <!-- API Keys Tab -->
+    <div class="tab-content" id="tab-keys">
+      <div class="btn-row">
+        <button class="btn primary" onclick="showCreateKey()">Generate Key</button>
+        <button class="btn" onclick="loadKeys()">Refresh</button>
+      </div>
+      <div id="key-status"></div>
+      <div class="table-wrap" id="keys-table"></div>
+    </div>
+
+    <!-- Webhooks Tab -->
+    <div class="tab-content" id="tab-webhooks">
+      <div class="btn-row">
+        <button class="btn primary" onclick="showCreateWebhook()">Add Webhook</button>
+        <button class="btn" onclick="loadWebhooks()">Refresh</button>
+      </div>
+      <div class="table-wrap" id="webhooks-table"></div>
+    </div>
+
+    <!-- Live Feed Tab -->
+    <div class="tab-content" id="tab-live">
+      <div class="card-grid" style="margin-bottom:16px">
+        <div class="card"><div class="label">Live Clients</div><div class="value" id="live-clients">0</div></div>
+        <div class="card"><div class="label">Events/min</div><div class="value" id="live-rate">0</div></div>
+      </div>
+      <div class="live-feed" id="live-feed">
+        <div style="color:var(--text-muted);text-align:center;padding:40px">Waiting for events...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modals -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal" id="modal-content"></div>
+  </div>
+
+  <script src="/js/dashboard.js"></script>
+</body>
+</html>

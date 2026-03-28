@@ -789,4 +789,79 @@ function routeToUploader(eventType, data, tabUrl) {
   }]);
 }
 
-console.log('EyeD service worker v1.2 initialized');
+/* ========== KEYBOARD SHORTCUTS ========== */
+chrome.commands.onCommand.addListener((command) => {
+  switch (command) {
+    case 'toggle-recording':
+      toggleRecording();
+      break;
+    case 'toggle-heatmap':
+      broadcastToContentScripts({ type: 'TOGGLE_HEATMAP' });
+      break;
+    case 'take-screenshot':
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.id) {
+          chrome.tabs.sendMessage(tabs[0].id, { type: 'CAPTURE_VIEWPORT_SCREENSHOT' }).catch(() => {});
+        }
+      });
+      break;
+  }
+});
+
+/* ========== NETWORK STATUS ========== */
+let networkStatus = 'unknown'; // 'connected', 'disconnected', 'error', 'no-key'
+
+async function checkEndpointStatus() {
+  if (!eyedSettings?.apiEndpoint || !eyedSettings?.apiKey) {
+    networkStatus = eyedSettings?.apiEndpoint ? 'no-key' : 'disconnected';
+    return;
+  }
+  try {
+    const res = await fetch(`${eyedSettings.apiEndpoint}/health`, {
+      signal: AbortSignal.timeout(5000),
+      headers: eyedSettings.apiKey ? { 'Authorization': `Bearer ${eyedSettings.apiKey}` } : {},
+    });
+    networkStatus = res.ok ? 'connected' : (res.status === 401 ? 'auth-error' : 'error');
+  } catch {
+    networkStatus = 'disconnected';
+  }
+}
+
+// Check every 60 seconds
+setInterval(checkEndpointStatus, 60000);
+// Check on startup after settings load
+setTimeout(checkEndpointStatus, 3000);
+
+/* ========== AUTO SESSION NAMING ========== */
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  if (!recordingActive || currentSessionName) return;
+  chrome.tabs.get(tabId, (tab) => {
+    if (chrome.runtime.lastError || !tab?.url) return;
+    try {
+      const hostname = new URL(tab.url).hostname;
+      if (hostname && !hostname.startsWith('chrome')) {
+        currentSessionName = `${hostname} — ${new Date().toLocaleDateString()}`;
+      }
+    } catch {}
+  });
+});
+
+/* ========== EXTENDED STATUS ========== */
+// Add network status to GET_RECORDING_STATE responses
+const _originalRecordingHandler = true; // Flag: extended handler below
+
+// Override the GET_RECORDING_STATE and GET_TRACKING_STATE to include network/queue info
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'GET_NETWORK_STATUS') {
+    sendResponse({
+      network: networkStatus,
+      queueSize: EyedUploader.getQueueSize(),
+      screenshotQueue: EyedUploader.getScreenshotQueueSize(),
+      endpoint: eyedSettings?.apiEndpoint ? true : false,
+      hasKey: eyedSettings?.apiKey ? true : false,
+    });
+    return true;
+  }
+});
+
+console.log('EyeD service worker v1.3 initialized');

@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EyeD — Session Detail</title>
+  <link rel="stylesheet" href="/css/dashboard.css">
+</head>
+<body>
+  <div class="header">
+    <h1><a href="/dashboard" style="color:var(--text)">EyeD</a> / Session</h1>
+  </div>
+  <div class="container">
+    <div id="content"><p style="color:var(--text-muted)">Loading...</p></div>
+  </div>
+  <script src="/js/dashboard.js"></script>
+  <script>
+    const sessionId = location.pathname.split('/').pop();
+    (async () => {
+      try {
+        const res = await api(`/sessions/${sessionId}/summary`);
+        const { summary } = await res.json();
+        renderSummary(summary, document.getElementById('content'));
+      } catch (err) {
+        document.getElementById('content').innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+      }
+    })();
+  </script>
+</body>
+</html>

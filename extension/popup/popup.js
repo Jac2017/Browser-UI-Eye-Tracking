@@ -59,6 +59,28 @@ async function updateStatus() {
     }
   } catch (e) {}
 
+  // Update network status
+  try {
+    const netState = await chrome.runtime.sendMessage({ type: 'GET_NETWORK_STATUS' });
+    const netEl = $('#network-status');
+    const queueEl = $('#queue-status');
+    if (netState) {
+      const statusMap = {
+        'connected': ['Connected', 'on'],
+        'disconnected': ['Disconnected', 'off'],
+        'error': ['Error', 'off'],
+        'auth-error': ['Auth Failed', 'off'],
+        'no-key': ['No API Key', 'off'],
+        'unknown': ['Unknown', 'off'],
+      };
+      const [text, cls] = statusMap[netState.network] || ['Unknown', 'off'];
+      netEl.textContent = text;
+      netEl.className = `status-value ${cls}`;
+      queueEl.textContent = `${netState.queueSize} events, ${netState.screenshotQueue} screenshots`;
+      queueEl.className = netState.queueSize > 0 ? 'status-value active' : 'status-value off';
+    }
+  } catch (e) {}
+
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
