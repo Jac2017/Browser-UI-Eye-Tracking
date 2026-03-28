@@ -16,6 +16,14 @@
       </div>
     </header>
 
+    <!-- Recording Toggle -->
+    <div class="section">
+      <button id="btn-toggle-recording" class="btn recording-btn full-width">
+        <span id="rec-dot" class="rec-dot off"></span>
+        <span id="rec-label">Start Recording</span>
+      </button>
+    </div>
+
     <!-- Status -->
     <div id="status-section" class="section">
       <div class="status-row">
@@ -25,6 +33,10 @@
       <div class="status-row">
         <span class="status-label">Tracking:</span>
         <span id="tracking-status" class="status-value off">Inactive</span>
+      </div>
+      <div class="status-row">
+        <span class="status-label">Recording:</span>
+        <span id="recording-status" class="status-value off">Off</span>
       </div>
       <div class="status-row">
         <span class="status-label">This page:</span>
@@ -99,11 +111,16 @@
       </div>
     </div>
 
+    <!-- Settings -->
+    <div class="section">
+      <button id="btn-settings" class="btn full-width">Settings</button>
+    </div>
+
     <!-- Info -->
     <div id="info-section" class="section small">
+      <p>Green dot = recording. Red = idle. Click record to start collecting data.</p>
       <p>Gaze: thermal heatmap (blue-red). First-viewed: <span class="orange">orange</span> numbered markers.</p>
       <p>Scanpath: numbered fixation circles with saccade lines.</p>
-      <p>Screenshots capture page + heatmap overlay as PNG.</p>
     </div>
   </div>
 

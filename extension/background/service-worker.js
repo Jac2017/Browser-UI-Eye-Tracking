@@ -2,13 +2,16 @@
  * EyeD Background Service Worker
  * Coordinates gaze data from tracker tab to content scripts on all tabs.
  * Manages session state, heatmap data, first-viewed element tracking,
- * screenshot capture, and analytics data routing.
+ * screenshot capture, analytics data routing, and centralized upload.
  */
+
+importScripts('uploader.js');
 
 /* ========== STATE ========== */
 let trackerTabId = null;
 let trackingActive = false;
 let modelReady = false;
+let recordingActive = false; // Icon-toggle recording state
 
 const heatmapData = new Map();
 const sessionData = new Map();
@@ -96,6 +99,70 @@ restoreState();
 
 // Periodic persist
 persistTimer = setInterval(persistState, PERSIST_INTERVAL_MS);
+
+/* ========== SETTINGS ========== */
+let eyedSettings = null;
+
+async function loadSettings() {
+  try {
+    const result = await chrome.storage.sync.get({ eyedSettings: null });
+    eyedSettings = result.eyedSettings;
+    if (eyedSettings) {
+      EyedUploader.init({
+        apiEndpoint: eyedSettings.apiEndpoint || '',
+        uploadEnabled: eyedSettings.uploadEnabled !== false,
+        batchInterval: eyedSettings.batchInterval || 30,
+        stripQueryParams: eyedSettings.stripQueryParams !== false,
+        stripHash: eyedSettings.stripHash || false,
+        liteMode: eyedSettings.liteMode || false,
+      });
+    }
+  } catch (e) {
+    console.warn('EyeD settings load error:', e);
+  }
+}
+
+function isChannelEnabled(channel) {
+  if (!eyedSettings || !eyedSettings.channels) return true; // Default on
+  return eyedSettings.channels[channel] !== false;
+}
+
+function isDomainAllowed(url) {
+  if (!eyedSettings || eyedSettings.scopeMode === 'all' || !eyedSettings.domainList) return true;
+  try {
+    const hostname = new URL(url).hostname;
+    const domains = eyedSettings.domainList.split('\n').map(d => d.trim()).filter(Boolean);
+    if (domains.length === 0) return true;
+    const match = domains.some(d => hostname === d || hostname.endsWith('.' + d));
+    return eyedSettings.scopeMode === 'whitelist' ? match : !match;
+  } catch {
+    return true;
+  }
+}
+
+loadSettings();
+
+/* ========== ICON CLICK TOGGLE ========== */
+// MV3: action.onClicked only fires when there is NO default_popup.
+// We use contextMenu or programmatic popup control instead.
+// Toggle recording via the popup button or message.
+
+function toggleRecording() {
+  recordingActive = !recordingActive;
+  if (recordingActive) {
+    // Send session start to uploader
+    EyedUploader.sendSessionStart({
+      sessionName: currentSessionName || 'Untitled',
+      userAgent: '', // populated by first content script report
+    });
+    broadcastToContentScripts({ type: 'RECORDING_STATE', active: true });
+  } else {
+    broadcastToContentScripts({ type: 'RECORDING_STATE', active: false });
+    EyedUploader.flush();
+  }
+  updateBadge();
+  persistDirty = true;
+}
 
 // Rate limiting for broadcasts
 let lastBroadcastTime = 0;
@@ -324,6 +391,77 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         return true;
 
+      case 'TOGGLE_RECORDING':
+        toggleRecording();
+        sendResponse({ recording: recordingActive });
+        return true;
+
+      case 'GET_RECORDING_STATE':
+        sendResponse({ recording: recordingActive });
+        return true;
+
+      case 'SETTINGS_UPDATED':
+        eyedSettings = msg.settings;
+        if (eyedSettings) {
+          EyedUploader.updateSettings({
+            apiEndpoint: eyedSettings.apiEndpoint || '',
+            uploadEnabled: eyedSettings.uploadEnabled !== false,
+            batchInterval: eyedSettings.batchInterval || 30,
+            stripQueryParams: eyedSettings.stripQueryParams !== false,
+            stripHash: eyedSettings.stripHash || false,
+            liteMode: eyedSettings.liteMode || false,
+          });
+        }
+        // Forward settings to content scripts
+        broadcastToContentScripts({ type: 'SETTINGS_UPDATED', settings: eyedSettings });
+        sendResponse({ ok: true });
+        return true;
+
+      case 'GET_SETTINGS':
+        sendResponse({ settings: eyedSettings });
+        return true;
+
+      case 'OPEN_SETTINGS':
+        chrome.runtime.openOptionsPage();
+        sendResponse({ ok: true });
+        return true;
+
+      case 'CONTENT_EVENTS': {
+        // Batch events from content scripts for upload
+        if (!recordingActive) break;
+        const tabUrl = sender.tab?.url || '';
+        if (!isDomainAllowed(tabUrl)) break;
+
+        const events = msg.events;
+        if (Array.isArray(events) && events.length > 0) {
+          const sanitizedUrl = EyedUploader.sanitizeUrl(tabUrl);
+          const enriched = events.map(e => ({
+            ...e,
+            url: sanitizedUrl,
+            tabId: sender.tab?.id,
+          }));
+          EyedUploader.enqueue(enriched);
+        }
+        break;
+      }
+
+      case 'AUTO_SCREENSHOT': {
+        // Auto-screenshot from content script for upload
+        if (!recordingActive || !isChannelEnabled('autoScreenshots')) break;
+        if (!isDomainAllowed(sender.tab?.url)) break;
+
+        EyedUploader.enqueueScreenshot({
+          timestamp: msg.timestamp || Date.now(),
+          url: sender.tab?.url || '',
+          tabId: sender.tab?.id,
+          trigger: msg.trigger || 'periodic',
+          dataUrl: msg.dataUrl,
+          width: msg.width,
+          height: msg.height,
+        });
+        break;
+      }
+
       case 'CAPTURE_SCREENSHOT':
         captureScreenshot(sender.tab?.id, sendResponse);
         return true;
@@ -345,6 +483,9 @@ function handleGazeData(msg) {
   if (!trackingActive) return;
   // Validate numeric inputs
   if (!isNum(msg.x) || !isNum(msg.y) || !isNum(msg.timestamp)) return;
+
+  // Route to uploader for centralized collection
+  routeToUploader('gaze', { x: msg.x, y: msg.y, timestamp: msg.timestamp, confidence: msg.confidence }, '');
 
   const now = Date.now();
   const gazeMsg = {
@@ -377,6 +518,10 @@ function handleGazeData(msg) {
 function handleInputData(msg, tabId) {
   if (!tabId) return;
 
+  // Route to uploader
+  const channel = msg.type === 'TOUCH_DATA' ? 'touch' : 'mouse';
+  routeToUploader(channel, { x: msg.x, y: msg.y, pageX: msg.pageX, pageY: msg.pageY, timestamp: msg.timestamp }, '');
+
   const data = getTabData(tabId);
   const point = {
     x: msg.x, y: msg.y,
@@ -398,6 +543,16 @@ function handleStoreGazePoint(msg, sender) {
   if (!sender.tab) return;
   // Validate required numeric fields
   if (!isNum(msg.x) || !isNum(msg.y) || !isNum(msg.timestamp)) return;
+
+  // Route to uploader with full data
+  routeToUploader('gaze', {
+    x: msg.x, y: msg.y,
+    pageX: msg.pageX, pageY: msg.pageY,
+    scrollX: msg.scrollX, scrollY: msg.scrollY,
+    viewportWidth: msg.viewportWidth, viewportHeight: msg.viewportHeight,
+    timestamp: msg.timestamp,
+    videoTime: msg.videoTime, onVideo: msg.onVideo,
+  }, sender.tab?.url || '');
 
   const tabId = sender.tab.id;
   const data = getTabData(tabId);
@@ -590,12 +745,33 @@ function openInsightsTab() {
 
 /* ========== BADGE ========== */
 function updateBadge() {
-  const text = trackingActive ? 'ON' : '';
-  const color = trackingActive ? '#238636' : '#484f58';
-  chrome.action.setBadgeText({ text }).catch(() => {});
-  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
+  if (recordingActive) {
+    // Green when recording
+    chrome.action.setBadgeText({ text: 'REC' }).catch(() => {});
+    chrome.action.setBadgeBackgroundColor({ color: '#238636' }).catch(() => {});
+  } else if (trackingActive) {
+    chrome.action.setBadgeText({ text: 'ON' }).catch(() => {});
+    chrome.action.setBadgeBackgroundColor({ color: '#1f6feb' }).catch(() => {});
+  } else {
+    // Red dot when idle
+    chrome.action.setBadgeText({ text: 'OFF' }).catch(() => {});
+    chrome.action.setBadgeBackgroundColor({ color: '#da3633' }).catch(() => {});
+  }
 }
 
 setInterval(updateBadge, 2000);
 
-console.log('EyeD service worker v1.1 initialized');
+// Also route gaze/input data to uploader when recording
+function routeToUploader(eventType, data, tabUrl) {
+  if (!recordingActive) return;
+  if (!isDomainAllowed(tabUrl)) return;
+  if (!isChannelEnabled(eventType)) return;
+
+  EyedUploader.enqueue([{
+    type: eventType,
+    ...data,
+    url: EyedUploader.sanitizeUrl(tabUrl),
+  }]);
+}
+
+console.log('EyeD service worker v1.2 initialized');

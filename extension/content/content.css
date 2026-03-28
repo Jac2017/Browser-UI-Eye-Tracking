@@ -75,6 +75,18 @@
   display: block;
 }
 
+#eyed-tracking-indicator.recording {
+  display: block;
+  background: #3fb950;
+  width: 14px;
+  height: 14px;
+  box-shadow: 0 0 8px rgba(63, 185, 80, 0.6);
+}
+
+#eyed-tracking-indicator:not(.active):not(.recording) {
+  display: none;
+}
+
 @keyframes eyed-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

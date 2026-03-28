@@ -36,6 +36,29 @@ async function updateStatus() {
     }
   } catch (e) {}
 
+  // Update recording state
+  try {
+    const recState = await chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATE' });
+    const dot = $('#rec-dot');
+    const label = $('#rec-label');
+    const recStatus = $('#recording-status');
+    const btn = $('#btn-toggle-recording');
+
+    if (recState?.recording) {
+      dot.className = 'rec-dot on';
+      label.textContent = 'Stop Recording';
+      btn.classList.add('recording-active');
+      recStatus.textContent = 'Active';
+      recStatus.className = 'status-value on';
+    } else {
+      dot.className = 'rec-dot off';
+      label.textContent = 'Start Recording';
+      btn.classList.remove('recording-active');
+      recStatus.textContent = 'Off';
+      recStatus.className = 'status-value off';
+    }
+  } catch (e) {}
+
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
@@ -58,6 +81,14 @@ async function updateStatus() {
     $('#page-stats').className = 'status-value off';
   }
 }
+
+/* ========== RECORDING TOGGLE ========== */
+$('#btn-toggle-recording').addEventListener('click', async () => {
+  try {
+    await chrome.runtime.sendMessage({ type: 'TOGGLE_RECORDING' });
+    updateStatus();
+  } catch (e) {}
+});
 
 /* ========== BUTTON HANDLERS ========== */
 $('#btn-open-tracker').addEventListener('click', async () => {
@@ -222,6 +253,12 @@ async function loadSessionInfo() {
     }
   } catch (e) {}
 }
+
+/* ========== SETTINGS ========== */
+$('#btn-settings').addEventListener('click', async () => {
+  await chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' });
+  window.close();
+});
 
 /* ========== INIT ========== */
 updateStatus();

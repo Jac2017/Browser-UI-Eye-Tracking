@@ -14,6 +14,7 @@
   /* ========== STATE ========== */
   const state = {
     trackingActive: false,
+    recordingActive: false,
     showHeatmap: false,
     showScanpath: false,
     showCursor: true,
@@ -37,6 +38,22 @@
     // Pre-filtered gaze cache
     _gazeNonUI: null,
     _gazeNonUIDirty: true,
+    // Settings from background
+    settings: null,
+    // Event buffer for centralized upload
+    eventBuffer: [],
+    eventFlushTimer: null,
+    // Scroll depth tracking
+    maxScrollDepth: 0,
+    scrollMilestones: { 25: false, 50: false, 75: false, 100: false },
+    // Hover tracking
+    hoverTarget: null,
+    hoverStartTime: 0,
+    // Rage/dead click tracking
+    recentClicks: [],
+    // Auto-screenshot
+    autoScreenshotTimer: null,
+    lastAutoScreenshotTime: 0,
   };
 
   /* ========== DOM SETUP ========== */
@@ -692,6 +709,27 @@
         document.getElementById('eyed-gaze-cursor')?.classList.toggle('active', msg.active && state.showCursor);
         break;
 
+      case 'RECORDING_STATE':
+        state.recordingActive = msg.active;
+        if (msg.active) {
+          startEventFlushTimer();
+          if (isChannelEnabled('autoScreenshots')) startAutoScreenshots();
+          // Auto-screenshot on page load
+          if (isChannelEnabled('screenshotOnLoad')) {
+            setTimeout(() => captureAutoScreenshot('pageLoad'), 2000);
+          }
+        } else {
+          stopEventFlushTimer();
+          stopAutoScreenshots();
+        }
+        // Update recording indicator
+        document.getElementById('eyed-tracking-indicator')?.classList.toggle('recording', msg.active);
+        break;
+
+      case 'SETTINGS_UPDATED':
+        state.settings = msg.settings;
+        break;
+
       case 'NEW_PAGE_LOADED':
         state.isNewPage = true;
         state.pageLoadTime = msg.timestamp;
@@ -836,6 +874,450 @@
         return true;
     }
   });
+
+  /* ========== EVENT BUFFERING FOR CENTRALIZED UPLOAD ========== */
+  function bufferEvent(event) {
+    if (!state.recordingActive) return;
+    state.eventBuffer.push(event);
+
+    // Flush when buffer is large enough
+    if (state.eventBuffer.length >= 50) {
+      flushEventBuffer();
+    }
+  }
+
+  function flushEventBuffer() {
+    if (state.eventBuffer.length === 0) return;
+    const events = state.eventBuffer.splice(0, state.eventBuffer.length);
+    chrome.runtime.sendMessage({ type: 'CONTENT_EVENTS', events }).catch(() => {});
+  }
+
+  function startEventFlushTimer() {
+    if (state.eventFlushTimer) return;
+    state.eventFlushTimer = setInterval(flushEventBuffer, 5000);
+  }
+
+  function stopEventFlushTimer() {
+    if (state.eventFlushTimer) { clearInterval(state.eventFlushTimer); state.eventFlushTimer = null; }
+    flushEventBuffer();
+  }
+
+  function isChannelEnabled(channel) {
+    if (!state.settings?.channels) return true;
+    return state.settings.channels[channel] !== false;
+  }
+
+  function getElementMeta(el) {
+    if (!el || !el.tagName) return null;
+    if (state.settings?.liteMode) return null;
+    return {
+      tag: el.tagName,
+      id: el.id || undefined,
+      selector: el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`,
+      text: (el.textContent || '').substring(0, 40).trim() || undefined,
+      href: el.href || el.closest('a')?.href || undefined,
+    };
+  }
+
+  /* ========== NEW DATA CHANNEL: CLICKS ========== */
+  function initClickTracking() {
+    document.addEventListener('click', (e) => {
+      if (!state.recordingActive || !isChannelEnabled('clicks')) return;
+
+      const now = Date.now();
+      const x = e.clientX;
+      const y = e.clientY;
+      const el = e.target;
+
+      const clickEvent = {
+        type: 'click',
+        x: x / window.innerWidth,
+        y: y / window.innerHeight,
+        pageX: x + window.scrollX,
+        pageY: y + window.scrollY,
+        timestamp: now,
+        button: e.button,
+        element: getElementMeta(el),
+      };
+
+      bufferEvent(clickEvent);
+
+      // Track for rage/dead click detection
+      state.recentClicks.push({ x, y, timestamp: now, target: el });
+      if (state.recentClicks.length > 10) state.recentClicks.shift();
+
+      // Rage click detection: 3+ clicks within 50px and 2s
+      if (isChannelEnabled('rageClicks')) {
+        const recent = state.recentClicks.filter(c => now - c.timestamp < 2000);
+        const nearby = recent.filter(c => Math.abs(c.x - x) < 50 && Math.abs(c.y - y) < 50);
+        if (nearby.length >= 3) {
+          bufferEvent({
+            type: 'rageClick',
+            x: x / window.innerWidth,
+            y: y / window.innerHeight,
+            pageX: x + window.scrollX,
+            pageY: y + window.scrollY,
+            timestamp: now,
+            clickCount: nearby.length,
+            element: getElementMeta(el),
+          });
+        }
+      }
+
+      // Dead click detection: click that doesn't cause navigation or visible change
+      if (isChannelEnabled('deadClicks')) {
+        const isInteractive = el.tagName === 'A' || el.tagName === 'BUTTON' || el.tagName === 'INPUT' ||
+          el.tagName === 'SELECT' || el.tagName === 'TEXTAREA' ||
+          el.closest('a') || el.closest('button') || el.getAttribute('role') === 'button' ||
+          el.onclick || el.style.cursor === 'pointer';
+
+        if (!isInteractive) {
+          bufferEvent({
+            type: 'deadClick',
+            x: x / window.innerWidth,
+            y: y / window.innerHeight,
+            pageX: x + window.scrollX,
+            pageY: y + window.scrollY,
+            timestamp: now,
+            element: getElementMeta(el),
+          });
+        }
+      }
+    }, true);
+  }
+
+  /* ========== NEW DATA CHANNEL: HOVER DWELL ========== */
+  function initHoverTracking() {
+    document.addEventListener('mouseover', (e) => {
+      if (!state.recordingActive || !isChannelEnabled('hovers')) return;
+
+      const el = e.target;
+      if (el === state.hoverTarget) return;
+
+      // End previous hover
+      endCurrentHover();
+
+      state.hoverTarget = el;
+      state.hoverStartTime = Date.now();
+    }, { passive: true });
+
+    document.addEventListener('mouseout', (e) => {
+      if (e.target === state.hoverTarget) {
+        endCurrentHover();
+      }
+    }, { passive: true });
+  }
+
+  function endCurrentHover() {
+    if (!state.hoverTarget || !state.hoverStartTime) return;
+    const dwellTime = Date.now() - state.hoverStartTime;
+
+    // Only record hovers > 300ms (ignore pass-throughs)
+    if (dwellTime > 300 && state.recordingActive && isChannelEnabled('hovers')) {
+      const rect = state.hoverTarget.getBoundingClientRect();
+      bufferEvent({
+        type: 'hover',
+        timestamp: state.hoverStartTime,
+        dwellTime,
+        x: (rect.left + rect.width / 2) / window.innerWidth,
+        y: (rect.top + rect.height / 2) / window.innerHeight,
+        element: getElementMeta(state.hoverTarget),
+      });
+    }
+
+    state.hoverTarget = null;
+    state.hoverStartTime = 0;
+  }
+
+  /* ========== NEW DATA CHANNEL: SCROLL DEPTH & VELOCITY ========== */
+  function initScrollDepthTracking() {
+    let lastScrollY = window.scrollY;
+    let lastScrollTime = Date.now();
+
+    document.addEventListener('scroll', () => {
+      if (!state.recordingActive) return;
+
+      const now = Date.now();
+      const scrollY = window.scrollY;
+      const pageHeight = document.documentElement.scrollHeight;
+      const viewHeight = window.innerHeight;
+      const maxScroll = pageHeight - viewHeight;
+
+      if (maxScroll <= 0) return;
+
+      const depth = Math.min(100, ((scrollY + viewHeight) / pageHeight) * 100);
+
+      // Track max scroll depth
+      if (depth > state.maxScrollDepth) {
+        state.maxScrollDepth = depth;
+      }
+
+      // Scroll depth milestones
+      if (isChannelEnabled('scrollDepth')) {
+        for (const milestone of [25, 50, 75, 100]) {
+          if (!state.scrollMilestones[milestone] && depth >= milestone) {
+            state.scrollMilestones[milestone] = true;
+            bufferEvent({
+              type: 'scrollMilestone',
+              milestone,
+              timestamp: now,
+              scrollY,
+              pageHeight,
+              viewHeight,
+            });
+
+            // Auto-screenshot on scroll milestone
+            if (isChannelEnabled('screenshotOnScroll')) {
+              captureAutoScreenshot('scrollMilestone_' + milestone);
+            }
+          }
+        }
+      }
+
+      // Scroll velocity (throttled)
+      if (isChannelEnabled('scroll') && now - lastScrollTime > 200) {
+        const deltaY = scrollY - lastScrollY;
+        const deltaTime = (now - lastScrollTime) / 1000;
+        const velocity = deltaTime > 0 ? deltaY / deltaTime : 0;
+
+        bufferEvent({
+          type: 'scroll',
+          scrollY,
+          scrollX: window.scrollX,
+          depth: Math.round(depth),
+          velocity: Math.round(velocity),
+          direction: deltaY > 0 ? 'down' : deltaY < 0 ? 'up' : 'none',
+          pageHeight,
+          viewHeight,
+          timestamp: now,
+        });
+
+        lastScrollY = scrollY;
+        lastScrollTime = now;
+      }
+    }, { passive: true });
+  }
+
+  /* ========== NEW DATA CHANNEL: TAB FOCUS / PAGE VISIBILITY ========== */
+  function initVisibilityTracking() {
+    if (!isChannelEnabled('visibility')) return;
+
+    window.addEventListener('focus', () => {
+      if (!state.recordingActive) return;
+      bufferEvent({ type: 'tabFocus', timestamp: Date.now(), visible: true });
+    });
+
+    window.addEventListener('blur', () => {
+      if (!state.recordingActive) return;
+      endCurrentHover(); // End hover on blur
+      bufferEvent({ type: 'tabBlur', timestamp: Date.now(), visible: false });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (!state.recordingActive) return;
+      bufferEvent({
+        type: 'visibilityChange',
+        timestamp: Date.now(),
+        hidden: document.hidden,
+        visibilityState: document.visibilityState,
+      });
+    });
+  }
+
+  /* ========== NEW DATA CHANNEL: ELEMENT VISIBILITY (Intersection Observer) ========== */
+  let visibilityObserver = null;
+
+  function initElementVisibilityTracking() {
+    if (!isChannelEnabled('elementVisibility')) return;
+
+    const observedEntries = new Map(); // selector -> { visible, timestamp }
+
+    visibilityObserver = new IntersectionObserver((entries) => {
+      if (!state.recordingActive) return;
+
+      for (const entry of entries) {
+        const el = entry.target;
+        const selector = el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}`;
+
+        const wasVisible = observedEntries.get(selector)?.visible || false;
+        const isVisible = entry.isIntersecting;
+
+        if (isVisible !== wasVisible) {
+          observedEntries.set(selector, { visible: isVisible, timestamp: Date.now() });
+          bufferEvent({
+            type: 'elementVisibility',
+            timestamp: Date.now(),
+            visible: isVisible,
+            ratio: Math.round(entry.intersectionRatio * 100) / 100,
+            element: getElementMeta(el),
+          });
+        }
+      }
+    }, { threshold: [0, 0.25, 0.5, 0.75, 1.0] });
+
+    // Observe key semantic elements
+    const selectors = 'h1, h2, h3, nav, header, footer, main, article, section, form, [role="banner"], [role="navigation"], [role="main"], img[alt], video';
+    document.querySelectorAll(selectors).forEach(el => {
+      visibilityObserver.observe(el);
+    });
+  }
+
+  /* ========== NEW DATA CHANNEL: FORM FOCUS/BLUR ========== */
+  function initFormTracking() {
+    if (!isChannelEnabled('formFocus')) return;
+
+    document.addEventListener('focusin', (e) => {
+      if (!state.recordingActive) return;
+      const el = e.target;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        bufferEvent({
+          type: 'formFocus',
+          timestamp: Date.now(),
+          fieldType: el.type || el.tagName.toLowerCase(),
+          element: getElementMeta(el),
+        });
+      }
+    }, { passive: true });
+
+    document.addEventListener('focusout', (e) => {
+      if (!state.recordingActive) return;
+      const el = e.target;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        bufferEvent({
+          type: 'formBlur',
+          timestamp: Date.now(),
+          fieldType: el.type || el.tagName.toLowerCase(),
+          element: getElementMeta(el),
+        });
+      }
+    }, { passive: true });
+  }
+
+  /* ========== NEW DATA CHANNEL: TEXT SELECTION ========== */
+  function initTextSelectionTracking() {
+    if (!isChannelEnabled('textSelection')) return;
+
+    document.addEventListener('selectionchange', (() => {
+      let throttle = 0;
+      return () => {
+        if (!state.recordingActive) return;
+        const now = Date.now();
+        if (now - throttle < 500) return;
+        throttle = now;
+
+        const sel = document.getSelection();
+        if (!sel || sel.isCollapsed) return;
+
+        const text = sel.toString();
+        if (text.length < 2) return;
+
+        const range = sel.getRangeAt(0);
+        const rect = range.getBoundingClientRect();
+
+        bufferEvent({
+          type: 'textSelection',
+          timestamp: now,
+          length: text.length,
+          x: (rect.left + rect.width / 2) / window.innerWidth,
+          y: (rect.top + rect.height / 2) / window.innerHeight,
+          element: getElementMeta(sel.anchorNode?.parentElement),
+        });
+      };
+    })());
+  }
+
+  /* ========== NEW DATA CHANNEL: NAVIGATION ========== */
+  function initNavigationTracking() {
+    if (!isChannelEnabled('navigation')) return;
+
+    // Link clicks
+    document.addEventListener('click', (e) => {
+      if (!state.recordingActive) return;
+      const link = e.target.closest('a[href]');
+      if (!link) return;
+
+      bufferEvent({
+        type: 'navigation',
+        timestamp: Date.now(),
+        action: 'linkClick',
+        href: link.href,
+        text: (link.textContent || '').substring(0, 40).trim(),
+        newTab: link.target === '_blank',
+      });
+    }, { passive: true });
+
+    // Back/forward detection
+    window.addEventListener('popstate', () => {
+      if (!state.recordingActive) return;
+      bufferEvent({
+        type: 'navigation',
+        timestamp: Date.now(),
+        action: 'popstate',
+        url: window.location.href,
+      });
+    });
+  }
+
+  /* ========== AUTO-SCREENSHOT SYSTEM ========== */
+  function captureAutoScreenshot(trigger) {
+    if (!state.recordingActive || !isChannelEnabled('autoScreenshots')) return;
+
+    const now = Date.now();
+    // Debounce: min 5s between auto-screenshots
+    if (now - state.lastAutoScreenshotTime < 5000) return;
+    state.lastAutoScreenshotTime = now;
+
+    // Capture using the background screenshot mechanism
+    chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' }, (response) => {
+      if (chrome.runtime.lastError || !response?.dataUrl) return;
+
+      // Resize for upload
+      const maxWidth = state.settings?.screenshotMaxWidth || 1280;
+      const quality = (state.settings?.screenshotQuality || 70) / 100;
+
+      const img = new Image();
+      img.onload = () => {
+        const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+        const w = Math.round(img.width * scale);
+        const h = Math.round(img.height * scale);
+
+        const c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+
+        const compressed = c.toDataURL('image/jpeg', quality);
+
+        chrome.runtime.sendMessage({
+          type: 'AUTO_SCREENSHOT',
+          timestamp: now,
+          trigger,
+          dataUrl: compressed,
+          width: w,
+          height: h,
+        }).catch(() => {});
+      };
+      img.src = response.dataUrl;
+    });
+  }
+
+  function startAutoScreenshots() {
+    const interval = (state.settings?.screenshotInterval || 30) * 1000;
+    stopAutoScreenshots();
+    state.autoScreenshotTimer = setInterval(() => {
+      if (!document.hidden) {
+        captureAutoScreenshot('periodic');
+      }
+    }, interval);
+  }
+
+  function stopAutoScreenshots() {
+    if (state.autoScreenshotTimer) {
+      clearInterval(state.autoScreenshotTimer);
+      state.autoScreenshotTimer = null;
+    }
+  }
 
   /* ========== GAZE REPLAY / PLAYBACK ========== */
   const replay = {
@@ -997,10 +1479,28 @@
     createOverlayElements();
     initInputTracking();
 
+    // New data channels
+    initClickTracking();
+    initHoverTracking();
+    initScrollDepthTracking();
+    initVisibilityTracking();
+    initFormTracking();
+    initTextSelectionTracking();
+    initNavigationTracking();
+
+    // Defer element visibility observer slightly so DOM is more populated
+    setTimeout(initElementVisibilityTracking, 2000);
+
     // Init video tracker
     if (typeof EyedVideoTracker !== 'undefined') {
       EyedVideoTracker.init();
     }
+
+    // Load settings
+    chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response) => {
+      if (chrome.runtime.lastError) return;
+      if (response?.settings) state.settings = response.settings;
+    });
 
     chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' }, (response) => {
       if (chrome.runtime.lastError) return;
@@ -1008,6 +1508,19 @@
         state.trackingActive = true;
         document.getElementById('eyed-tracking-indicator')?.classList.add('active');
         document.getElementById('eyed-gaze-cursor')?.classList.add('active');
+      }
+    });
+
+    chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATE' }, (response) => {
+      if (chrome.runtime.lastError) return;
+      if (response?.recording) {
+        state.recordingActive = true;
+        startEventFlushTimer();
+        document.getElementById('eyed-tracking-indicator')?.classList.add('recording');
+        if (isChannelEnabled('autoScreenshots')) startAutoScreenshots();
+        if (isChannelEnabled('screenshotOnLoad')) {
+          setTimeout(() => captureAutoScreenshot('pageLoad'), 2000);
+        }
       }
     });
 

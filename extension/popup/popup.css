@@ -141,6 +141,45 @@ h1 {
   margin-bottom: 2px;
 }
 
+/* Recording button */
+.recording-btn {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px !important;
+  font-size: 0.9rem !important;
+  font-weight: 600;
+}
+
+.recording-btn.recording-active {
+  background: #238636;
+  border-color: #238636;
+  color: #fff;
+}
+
+.rec-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  transition: background 0.3s;
+}
+
+.rec-dot.off {
+  background: #da3633;
+}
+
+.rec-dot.on {
+  background: #3fb950;
+  animation: rec-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes rec-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(63, 185, 80, 0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(63, 185, 80, 0); }
+}
+
 .orange {
   color: #ffa500;
   font-weight: 600;
