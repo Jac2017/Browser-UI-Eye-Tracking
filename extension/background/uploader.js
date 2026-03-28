@@ -73,8 +73,9 @@ const EyedUploader = (() => {
   // Encrypt plaintext JSON string to base64(iv + ciphertext + tag)
   async function encryptPayload(jsonString) {
     if (!settings.apiKey) {
-      // No API key = no encryption possible, but still send
-      return { encrypted: false, data: jsonString };
+      // No API key = refuse to send unencrypted data
+      console.warn('EyeD: upload blocked — API key required for encryption');
+      return null;
     }
 
     try {
@@ -99,7 +100,7 @@ const EyedUploader = (() => {
       return { encrypted: true, data: base64 };
     } catch (err) {
       console.error('EyeD encryption failed:', err);
-      return { encrypted: false, data: jsonString };
+      return null; // Refuse to send unencrypted on crypto failure
     }
   }
 
@@ -114,7 +115,8 @@ const EyedUploader = (() => {
       );
       const sig = await crypto.subtle.sign('HMAC', key, encoder.encode(body));
       return btoa(String.fromCharCode(...new Uint8Array(sig)));
-    } catch {
+    } catch (err) {
+      console.error('EyeD HMAC signing failed:', err);
       return '';
     }
   }
@@ -194,9 +196,13 @@ const EyedUploader = (() => {
     if (!url) return '';
     try {
       const u = new URL(url);
+      // Block dangerous URL schemes
+      if (u.protocol === 'data:' || u.protocol === 'javascript:' || u.protocol === 'blob:') return '';
       if (settings.stripQueryParams) u.search = '';
       if (settings.stripHash) u.hash = '';
-      return u.toString();
+      // Cap URL length
+      const result = u.toString();
+      return result.length > 2000 ? result.substring(0, 2000) : result;
     } catch {
       return '';
     }
@@ -340,8 +346,12 @@ const EyedUploader = (() => {
       events,
     });
 
-    // Enforce max size
+    // Enforce max size with recursion depth limit
     if (payload.length > MAX_BATCH_JSON_SIZE) {
+      if (events.length <= 1) {
+        console.warn('EyeD: single event too large, dropping');
+        return false;
+      }
       console.warn('EyeD: batch too large, splitting');
       const half = Math.floor(events.length / 2);
       const a = await uploadBatch(events.slice(0, half));
@@ -349,8 +359,10 @@ const EyedUploader = (() => {
       return a && b;
     }
 
-    // Encrypt payload
-    const { encrypted, data } = await encryptPayload(payload);
+    // Encrypt payload — refuse to send if encryption fails
+    const encResult = await encryptPayload(payload);
+    if (!encResult) return false;
+    const { encrypted, data } = encResult;
     const bodyString = JSON.stringify({ encrypted, data });
     const signature = await signRequest(bodyString);
 
@@ -404,7 +416,9 @@ const EyedUploader = (() => {
       height: screenshotData.height,
     });
 
-    const { encrypted, data } = await encryptPayload(payload);
+    const encResult = await encryptPayload(payload);
+    if (!encResult) return false;
+    const { encrypted, data } = encResult;
     const bodyString = JSON.stringify({ encrypted, data });
     const signature = await signRequest(bodyString);
 
@@ -452,7 +466,9 @@ const EyedUploader = (() => {
       startTime: Date.now(),
     });
 
-    const { encrypted, data } = await encryptPayload(payload);
+    const encResult = await encryptPayload(payload);
+    if (!encResult) return;
+    const { encrypted, data } = encResult;
     const bodyString = JSON.stringify({ encrypted, data });
     const signature = await signRequest(bodyString);
 
@@ -482,7 +498,9 @@ const EyedUploader = (() => {
     await flush();
 
     const payload = JSON.stringify({ endTime: Date.now() });
-    const { encrypted, data } = await encryptPayload(payload);
+    const encResult = await encryptPayload(payload);
+    if (!encResult) return;
+    const { encrypted, data } = encResult;
     const bodyString = JSON.stringify({ encrypted, data });
     const signature = await signRequest(bodyString);
 

@@ -152,6 +152,7 @@
 
   function handleGazePoint(data) {
     if (!state.trackingActive) return;
+    if (!isChannelEnabled('gaze')) return;
 
     const { x, y, timestamp, confidence } = data;
 
@@ -306,18 +307,20 @@
       state.mousePos.x = e.clientX;
       state.mousePos.y = e.clientY;
 
-      if (state.trackingActive && Date.now() - mouseThrottle > 50) {
+      if (state.trackingActive && isChannelEnabled('mouse') && Date.now() - mouseThrottle > 50) {
         mouseThrottle = Date.now();
         const x = e.clientX / window.innerWidth;
         const y = e.clientY / window.innerHeight;
         state.mousePoints.push(createPoint(x, y));
 
-        chrome.runtime.sendMessage({
-          type: 'MOUSE_DATA', x, y,
-          pageX: e.clientX + window.scrollX,
-          pageY: e.clientY + window.scrollY,
-          timestamp: Date.now(),
-        }).catch(() => {});
+        if (state.recordingActive) {
+          chrome.runtime.sendMessage({
+            type: 'MOUSE_DATA', x, y,
+            pageX: e.clientX + window.scrollX,
+            pageY: e.clientY + window.scrollY,
+            timestamp: Date.now(),
+          }).catch(() => {});
+        }
 
         if (state.mousePoints.length > 5000) state.mousePoints = state.mousePoints.slice(-2500);
       }
@@ -328,18 +331,20 @@
     document.addEventListener('touchend', handleTouch, { passive: true });
 
     function handleTouch(e) {
-      if (!state.trackingActive) return;
+      if (!state.trackingActive || !isChannelEnabled('touch')) return;
       for (const touch of e.changedTouches) {
         const x = touch.clientX / window.innerWidth;
         const y = touch.clientY / window.innerHeight;
         state.touchPoints.push(createPoint(x, y));
 
-        chrome.runtime.sendMessage({
-          type: 'TOUCH_DATA', x, y,
-          pageX: touch.clientX + window.scrollX,
-          pageY: touch.clientY + window.scrollY,
-          timestamp: Date.now(),
-        }).catch(() => {});
+        if (state.recordingActive) {
+          chrome.runtime.sendMessage({
+            type: 'TOUCH_DATA', x, y,
+            pageX: touch.clientX + window.scrollX,
+            pageY: touch.clientY + window.scrollY,
+            timestamp: Date.now(),
+          }).catch(() => {});
+        }
       }
       if (state.touchPoints.length > 5000) state.touchPoints = state.touchPoints.slice(-2500);
     }
@@ -347,16 +352,18 @@
     // Track scroll events for scroll-position correlation
     let scrollThrottle = 0;
     document.addEventListener('scroll', () => {
-      if (!state.trackingActive || Date.now() - scrollThrottle < 100) return;
+      if (!state.trackingActive || !isChannelEnabled('scroll') || Date.now() - scrollThrottle < 100) return;
       scrollThrottle = Date.now();
-      chrome.runtime.sendMessage({
-        type: 'SCROLL_EVENT',
-        scrollX: window.scrollX,
-        scrollY: window.scrollY,
-        pageHeight: document.documentElement.scrollHeight,
-        viewHeight: window.innerHeight,
-        timestamp: Date.now(),
-      }).catch(() => {});
+      if (state.recordingActive) {
+        chrome.runtime.sendMessage({
+          type: 'SCROLL_EVENT',
+          scrollX: window.scrollX,
+          scrollY: window.scrollY,
+          pageHeight: document.documentElement.scrollHeight,
+          viewHeight: window.innerHeight,
+          timestamp: Date.now(),
+        }).catch(() => {});
+      }
     }, { passive: true });
   }
 
