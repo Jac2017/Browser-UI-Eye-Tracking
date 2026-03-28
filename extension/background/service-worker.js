@@ -110,6 +110,7 @@ async function loadSettings() {
     if (eyedSettings) {
       EyedUploader.init({
         apiEndpoint: eyedSettings.apiEndpoint || '',
+        apiKey: eyedSettings.apiKey || '',
         uploadEnabled: eyedSettings.uploadEnabled !== false,
         batchInterval: eyedSettings.batchInterval || 30,
         stripQueryParams: eyedSettings.stripQueryParams !== false,
@@ -405,6 +406,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (eyedSettings) {
           EyedUploader.updateSettings({
             apiEndpoint: eyedSettings.apiEndpoint || '',
+            apiKey: eyedSettings.apiKey || '',
             uploadEnabled: eyedSettings.uploadEnabled !== false,
             batchInterval: eyedSettings.batchInterval || 30,
             stripQueryParams: eyedSettings.stripQueryParams !== false,
@@ -429,18 +431,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'CONTENT_EVENTS': {
         // Batch events from content scripts for upload
         if (!recordingActive) break;
-        const tabUrl = sender.tab?.url || '';
-        if (!isDomainAllowed(tabUrl)) break;
+        // Validate sender is a real tab (not injected)
+        if (!sender.tab?.id || !sender.tab?.url) break;
+        if (sender.tab.url.startsWith('chrome://') || sender.tab.url.startsWith('chrome-extension://')) break;
+        if (!isDomainAllowed(sender.tab.url)) break;
 
         const events = msg.events;
-        if (Array.isArray(events) && events.length > 0) {
-          const sanitizedUrl = EyedUploader.sanitizeUrl(tabUrl);
-          const enriched = events.map(e => ({
-            ...e,
+        if (!Array.isArray(events)) break;
+        // Cap batch size to prevent memory exhaustion
+        const MAX_EVENTS_PER_MSG = 200;
+        const bounded = events.slice(0, MAX_EVENTS_PER_MSG);
+        if (bounded.length > 0) {
+          const sanitizedUrl = EyedUploader.sanitizeUrl(sender.tab.url);
+          const enriched = bounded.map(e => ({
+            ...(typeof e === 'object' && e !== null ? e : {}),
             url: sanitizedUrl,
-            tabId: sender.tab?.id,
+            tabId: sender.tab.id,
           }));
-          EyedUploader.enqueue(enriched);
+          EyedUploader.enqueue(enriched); // Uploader does per-event validation
         }
         break;
       }
@@ -448,12 +456,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       case 'AUTO_SCREENSHOT': {
         // Auto-screenshot from content script for upload
         if (!recordingActive || !isChannelEnabled('autoScreenshots')) break;
-        if (!isDomainAllowed(sender.tab?.url)) break;
+        if (!sender.tab?.id || !sender.tab?.url) break;
+        if (!isDomainAllowed(sender.tab.url)) break;
+
+        // Validate screenshot payload
+        if (typeof msg.dataUrl !== 'string' || !msg.dataUrl.startsWith('data:image/')) break;
+        if (msg.dataUrl.length > 5 * 1024 * 1024) break; // 5MB max
+        if (!isNum(msg.width) || msg.width < 1 || msg.width > 4096) break;
+        if (!isNum(msg.height) || msg.height < 1 || msg.height > 4096) break;
 
         EyedUploader.enqueueScreenshot({
-          timestamp: msg.timestamp || Date.now(),
-          url: sender.tab?.url || '',
-          tabId: sender.tab?.id,
+          timestamp: isNum(msg.timestamp) ? msg.timestamp : Date.now(),
+          url: sender.tab.url,
+          tabId: sender.tab.id,
           trigger: msg.trigger || 'periodic',
           dataUrl: msg.dataUrl,
           width: msg.width,

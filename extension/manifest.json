@@ -51,6 +51,6 @@
     }
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' https://cdn.jsdelivr.net/npm/@tensorflow/ https://cdn.jsdelivr.net/npm/@mediapipe/; object-src 'self'"
+    "extension_pages": "default-src 'none'; script-src 'self' https://cdn.jsdelivr.net/npm/@tensorflow/ https://cdn.jsdelivr.net/npm/@mediapipe/; style-src 'self'; img-src 'self' data:; connect-src https:; font-src 'self'; object-src 'none'; form-action 'self'; base-uri 'self'; upgrade-insecure-requests"
   }
 }

@@ -876,9 +876,16 @@
   });
 
   /* ========== EVENT BUFFERING FOR CENTRALIZED UPLOAD ========== */
+  const MAX_EVENT_BUFFER = 500;
+
   function bufferEvent(event) {
     if (!state.recordingActive) return;
     state.eventBuffer.push(event);
+
+    // Enforce max buffer size
+    if (state.eventBuffer.length > MAX_EVENT_BUFFER) {
+      state.eventBuffer = state.eventBuffer.slice(-Math.floor(MAX_EVENT_BUFFER * 0.75));
+    }
 
     // Flush when buffer is large enough
     if (state.eventBuffer.length >= 50) {
@@ -889,7 +896,13 @@
   function flushEventBuffer() {
     if (state.eventBuffer.length === 0) return;
     const events = state.eventBuffer.splice(0, state.eventBuffer.length);
-    chrome.runtime.sendMessage({ type: 'CONTENT_EVENTS', events }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'CONTENT_EVENTS', events }).catch(() => {
+      // On failure, restore events but cap buffer to prevent unbounded growth
+      state.eventBuffer.unshift(...events);
+      if (state.eventBuffer.length > MAX_EVENT_BUFFER) {
+        state.eventBuffer = state.eventBuffer.slice(-Math.floor(MAX_EVENT_BUFFER * 0.75));
+      }
+    });
   }
 
   function startEventFlushTimer() {
@@ -907,16 +920,42 @@
     return state.settings.channels[channel] !== false;
   }
 
+  // Sensitive input types where we never capture any metadata text
+  const SENSITIVE_INPUT_TYPES = new Set(['password', 'email', 'tel', 'ssn', 'credit-card']);
+
   function getElementMeta(el) {
     if (!el || !el.tagName) return null;
     if (state.settings?.liteMode) return null;
-    return {
-      tag: el.tagName,
+
+    const tag = el.tagName;
+    const meta = {
+      tag,
       id: el.id || undefined,
-      selector: el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`,
-      text: (el.textContent || '').substring(0, 40).trim() || undefined,
-      href: el.href || el.closest('a')?.href || undefined,
+      selector: el.id ? `#${el.id}` : `${tag.toLowerCase()}${el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : ''}`,
     };
+
+    // Never capture text content from sensitive fields
+    const isSensitive = (tag === 'INPUT' && SENSITIVE_INPUT_TYPES.has(el.type)) ||
+      tag === 'TEXTAREA' || tag === 'SELECT' ||
+      el.closest('[type="password"], [autocomplete*="cc-"], [autocomplete*="ssn"]');
+
+    if (!isSensitive) {
+      const text = (el.textContent || '').substring(0, 40).trim();
+      if (text) meta.text = text;
+    }
+
+    // Sanitize href — strip query params for privacy
+    const rawHref = el.href || el.closest('a')?.href;
+    if (rawHref) {
+      try {
+        const u = new URL(rawHref);
+        u.search = '';
+        u.hash = '';
+        meta.href = u.toString();
+      } catch { /* skip invalid URLs */ }
+    }
+
+    return meta;
   }
 
   /* ========== NEW DATA CHANNEL: CLICKS ========== */
@@ -1155,10 +1194,17 @@
       }
     }, { threshold: [0, 0.25, 0.5, 0.75, 1.0] });
 
-    // Observe key semantic elements
+    // Observe key semantic elements (cap at 50 to prevent performance issues)
     const selectors = 'h1, h2, h3, nav, header, footer, main, article, section, form, [role="banner"], [role="navigation"], [role="main"], img[alt], video';
-    document.querySelectorAll(selectors).forEach(el => {
-      visibilityObserver.observe(el);
+    const elements = document.querySelectorAll(selectors);
+    const maxObserve = Math.min(elements.length, 50);
+    for (let i = 0; i < maxObserve; i++) {
+      visibilityObserver.observe(elements[i]);
+    }
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (visibilityObserver) { visibilityObserver.disconnect(); visibilityObserver = null; }
     });
   }
 
@@ -1236,11 +1282,20 @@
       const link = e.target.closest('a[href]');
       if (!link) return;
 
+      // Sanitize link URL — strip query params to avoid leaking tokens/PII
+      let sanitizedHref = '';
+      try {
+        const u = new URL(link.href);
+        u.search = '';
+        u.hash = '';
+        sanitizedHref = u.toString();
+      } catch { sanitizedHref = ''; }
+
       bufferEvent({
         type: 'navigation',
         timestamp: Date.now(),
         action: 'linkClick',
-        href: link.href,
+        href: sanitizedHref,
         text: (link.textContent || '').substring(0, 40).trim(),
         newTab: link.target === '_blank',
       });
@@ -1249,11 +1304,18 @@
     // Back/forward detection
     window.addEventListener('popstate', () => {
       if (!state.recordingActive) return;
+      let sanitizedUrl = '';
+      try {
+        const u = new URL(window.location.href);
+        u.search = '';
+        u.hash = '';
+        sanitizedUrl = u.toString();
+      } catch { /* skip */ }
       bufferEvent({
         type: 'navigation',
         timestamp: Date.now(),
         action: 'popstate',
-        url: window.location.href,
+        url: sanitizedUrl,
       });
     });
   }

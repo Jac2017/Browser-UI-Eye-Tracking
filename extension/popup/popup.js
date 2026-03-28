@@ -242,14 +242,22 @@ async function loadSessionInfo() {
 
     const container = $('#saved-sessions');
     if (info.savedSessions && info.savedSessions.length > 0) {
-      container.innerHTML = info.savedSessions.map(s =>
-        `<div class="saved-session-item">
-          <span class="session-name">${s.name}</span>
-          <span class="session-meta">${s.totalGaze} pts</span>
-        </div>`
-      ).join('');
+      container.textContent = ''; // Clear safely
+      for (const s of info.savedSessions) {
+        const item = document.createElement('div');
+        item.className = 'saved-session-item';
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'session-name';
+        nameSpan.textContent = s.name; // Safe: textContent, not innerHTML
+        const metaSpan = document.createElement('span');
+        metaSpan.className = 'session-meta';
+        metaSpan.textContent = `${s.totalGaze} pts`;
+        item.appendChild(nameSpan);
+        item.appendChild(metaSpan);
+        container.appendChild(item);
+      }
     } else {
-      container.innerHTML = '';
+      container.textContent = '';
     }
   } catch (e) {}
 }

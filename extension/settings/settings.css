@@ -166,3 +166,22 @@ textarea::placeholder { color: #484f58; }
 .status-msg.success { color: #3fb950; }
 .status-msg.error { color: #f85149; }
 .status-msg.info { color: #58a6ff; }
+
+.hint {
+  font-size: 0.75rem;
+  color: #484f58;
+  margin: 4px 0 10px;
+}
+
+input[type="password"] {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  background: #0d1117;
+  color: #e6edf3;
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+
+input[type="password"]:focus { outline: none; border-color: #58a6ff; }

@@ -836,12 +836,17 @@ function initConsent() {
   });
 
   btnConsent.addEventListener('click', () => {
-    localStorage.setItem('eyed-consent', 'true');
+    // Store consent in chrome.storage.local (tamper-resistant vs localStorage)
+    chrome.storage.local.set({
+      _eyedConsent: true,
+      _eyedConsentDate: new Date().toISOString(),
+    });
     consentOverlay.style.display = 'none';
     proceedAfterConsent();
   });
 
   btnDecline.addEventListener('click', () => {
+    chrome.storage.local.set({ _eyedConsent: false });
     consentOverlay.style.display = 'none';
     setStatusText('Webcam access declined — reload to try again');
     $('#app').style.opacity = '0.5';
@@ -881,7 +886,7 @@ function initOnboarding() {
   });
 
   function finishOnboarding() {
-    localStorage.setItem('eyed-onboarded', 'true');
+    chrome.storage.local.set({ _eyedOnboarded: true });
     overlay.style.display = 'none';
   }
 }
@@ -1113,8 +1118,15 @@ function bindEvents() {
 
 /* ========== INIT ========== */
 async function proceedAfterConsent() {
-  // Show onboarding if first run
-  if (!localStorage.getItem('eyed-onboarded')) {
+  // Show onboarding if first run (check chrome.storage.local)
+  try {
+    const result = await chrome.storage.local.get(['_eyedOnboarded']);
+    if (!result._eyedOnboarded) {
+      $('#onboarding-overlay').style.display = 'flex';
+      initOnboarding();
+    }
+  } catch (e) {
+    // First run — show onboarding
     $('#onboarding-overlay').style.display = 'flex';
     initOnboarding();
   }
@@ -1148,8 +1160,9 @@ async function startApp() {
 async function init() {
   initConsent();
 
-  // Check if already consented
-  if (localStorage.getItem('eyed-consent')) {
+  // Check if already consented (using tamper-resistant chrome.storage.local)
+  const stored = await chrome.storage.local.get(['_eyedConsent']);
+  if (stored._eyedConsent) {
     $('#consent-overlay').style.display = 'none';
     await proceedAfterConsent();
   }

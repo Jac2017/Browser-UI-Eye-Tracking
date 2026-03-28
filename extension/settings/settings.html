@@ -19,12 +19,17 @@
     <!-- API Endpoint -->
     <section class="section">
       <h2>Data Endpoint</h2>
-      <p>Configure where collected data is sent. Leave empty to disable uploads.</p>
+      <p>Configure where collected data is sent. HTTPS required. Leave empty to disable uploads.</p>
       <div class="input-row">
         <input type="url" id="api-endpoint" placeholder="https://your-server.com/api" autocomplete="off">
         <button id="btn-test-endpoint" class="btn">Test</button>
       </div>
       <div id="endpoint-status" class="status-msg"></div>
+      <div class="input-row">
+        <input type="password" id="api-key" placeholder="API key (for auth + encryption)" autocomplete="off">
+        <button id="btn-toggle-key" class="btn" type="button">Show</button>
+      </div>
+      <p class="hint">API key is used for Bearer auth, AES-256-GCM payload encryption, and HMAC-SHA256 request signing.</p>
       <label class="toggle-row">
         <input type="checkbox" id="upload-enabled" checked>
         <span>Enable automatic uploads</span>
