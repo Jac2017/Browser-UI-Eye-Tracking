@@ -104,8 +104,20 @@ async function updateStatus() {
   }
 }
 
+/* ========== BUTTON DEBOUNCE ========== */
+const busyButtons = new Set();
+function debounceClick(selector, handler) {
+  $(selector).addEventListener('click', async (e) => {
+    if (busyButtons.has(selector)) return;
+    busyButtons.add(selector);
+    try { await handler(e); } finally {
+      setTimeout(() => busyButtons.delete(selector), 400);
+    }
+  });
+}
+
 /* ========== RECORDING TOGGLE ========== */
-$('#btn-toggle-recording').addEventListener('click', async () => {
+debounceClick('#btn-toggle-recording', async () => {
   try {
     await chrome.runtime.sendMessage({ type: 'TOGGLE_RECORDING' });
     updateStatus();
@@ -144,7 +156,7 @@ $('#btn-toggle-cursor').addEventListener('click', async () => {
   } catch (e) {}
 });
 
-$('#btn-start').addEventListener('click', async () => {
+debounceClick('#btn-start', async () => {
   try {
     const bgState = await chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' });
     if (bgState?.trackerTabId) {
@@ -154,7 +166,7 @@ $('#btn-start').addEventListener('click', async () => {
   } catch (e) {}
 });
 
-$('#btn-stop').addEventListener('click', async () => {
+debounceClick('#btn-stop', async () => {
   try {
     const bgState = await chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' });
     if (bgState?.trackerTabId) {
@@ -164,7 +176,7 @@ $('#btn-stop').addEventListener('click', async () => {
   } catch (e) {}
 });
 
-$('#btn-screenshot-viewport').addEventListener('click', async () => {
+debounceClick('#btn-screenshot-viewport', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
@@ -179,11 +191,10 @@ $('#btn-screenshot-viewport').addEventListener('click', async () => {
   } catch (e) {}
 });
 
-$('#btn-screenshot-fullpage').addEventListener('click', async () => {
+debounceClick('#btn-screenshot-fullpage', async () => {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
-      // Send message first, then close popup after confirmed delivery
       await chrome.tabs.sendMessage(tab.id, {
         type: 'CAPTURE_FULLPAGE_SCREENSHOT',
         download: true,
@@ -191,7 +202,6 @@ $('#btn-screenshot-fullpage').addEventListener('click', async () => {
         includeScanpath: true,
         includeFirstViewed: true,
       });
-      // Close popup after message is delivered (won't appear in subsequent captures)
       window.close();
     }
   } catch (e) {}

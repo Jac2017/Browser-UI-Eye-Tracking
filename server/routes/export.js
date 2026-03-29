@@ -97,7 +97,10 @@ router.get('/export/study/:studyId', authenticate, (req, res) => {
   res.set('Content-Disposition', `attachment; filename="study_${study.id}_${studyName}.json"`);
 
   res.write('{\n');
-  res.write(`"study":${JSON.stringify({ ...study, target_urls: JSON.parse(study.target_urls), config: JSON.parse(study.config) })},\n`);
+  let parsedUrls, parsedConfig;
+  try { parsedUrls = JSON.parse(study.target_urls); } catch { parsedUrls = []; }
+  try { parsedConfig = JSON.parse(study.config); } catch { parsedConfig = {}; }
+  res.write(`"study":${JSON.stringify({ ...study, target_urls: parsedUrls, config: parsedConfig })},\n`);
   res.write(`"participants":${JSON.stringify(participants)},\n`);
   res.write(`"sessions":${JSON.stringify(sessions)},\n`);
   res.write('"events":[');
@@ -118,8 +121,10 @@ router.get('/export/study/:studyId', authenticate, (req, res) => {
         const batch = stmt.all(sid, Math.min(batchSize, remaining), offset);
         if (batch.length === 0) break;
         for (const row of batch) {
-          res.write((first ? '' : ',') + JSON.stringify(row));
-          first = false;
+          try {
+            res.write((first ? '' : ',') + JSON.stringify(row));
+            first = false;
+          } catch { /* skip malformed row */ }
         }
         totalWritten += batch.length;
         offset += batch.length;
