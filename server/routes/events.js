@@ -41,17 +41,27 @@ const insertBatch = db.transaction((events, sessionId, apiKeyId) => {
     if (typeof e.timestamp !== 'number') continue;
 
     const extra = {};
+    const knownKeys = new Set(['type', 'timestamp', 'url', 'tabId', 'x', 'y', 'pageX', 'pageY', 'scrollX', 'scrollY', 'viewportWidth', 'viewportHeight']);
     for (const key of Object.keys(e)) {
-      if (!['type', 'timestamp', 'url', 'tabId', 'x', 'y', 'pageX', 'pageY', 'scrollX', 'scrollY', 'viewportWidth', 'viewportHeight'].includes(key)) {
-        extra[key] = e[key];
+      if (!knownKeys.has(key)) {
+        // Sanitize: cap string values, skip functions/objects
+        const val = e[key];
+        if (typeof val === 'string') extra[key] = val.substring(0, 500);
+        else if (typeof val === 'number' || typeof val === 'boolean') extra[key] = val;
+        // Skip functions, symbols, nested objects
       }
     }
+    const extraStr = JSON.stringify(extra);
+    if (extraStr.length > 5000) continue; // Skip events with oversized extra data
+
+    // Validate URL length
+    const url = typeof e.url === 'string' ? e.url.substring(0, 2000) : '';
 
     insertEvent.run(
       sessionId,
       e.type,
       e.timestamp,
-      e.url || '',
+      url,
       e.tabId || null,
       e.x ?? null,
       e.y ?? null,
@@ -61,7 +71,7 @@ const insertBatch = db.transaction((events, sessionId, apiKeyId) => {
       e.scrollY ?? null,
       e.viewportWidth ?? null,
       e.viewportHeight ?? null,
-      JSON.stringify(extra),
+      extraStr,
     );
     inserted++;
   }
@@ -101,11 +111,20 @@ router.post('/events', authenticate, (req, res) => {
 
     // Validate batch
     const { sessionId, events } = payload;
-    if (!sessionId || !Array.isArray(events)) {
+    if (!sessionId || typeof sessionId !== 'string' || sessionId.length > 100) {
+      return res.status(400).json({ error: 'Invalid batch format' });
+    }
+    if (!Array.isArray(events)) {
       return res.status(400).json({ error: 'Invalid batch format' });
     }
     if (events.length > config.maxBatchSize) {
       return res.status(400).json({ error: `Batch too large (max ${config.maxBatchSize})` });
+    }
+
+    // Verify session ownership: if session exists, it must belong to this API key
+    const existingSession = db.prepare('SELECT api_key_id FROM sessions WHERE id = ?').get(sessionId);
+    if (existingSession && existingSession.api_key_id !== req.apiKey.id) {
+      return res.status(403).json({ error: 'Session does not belong to this API key' });
     }
 
     const inserted = insertBatch(events, sessionId, req.apiKey.id);

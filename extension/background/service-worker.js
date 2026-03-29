@@ -428,6 +428,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         sendResponse({ ok: true });
         return true;
 
+      case 'GET_NETWORK_STATUS':
+        sendResponse({
+          network: networkStatus,
+          queueSize: EyedUploader.getQueueSize(),
+          screenshotQueue: EyedUploader.getScreenshotQueueSize(),
+          endpoint: eyedSettings?.apiEndpoint ? true : false,
+          hasKey: eyedSettings?.apiKey ? true : false,
+        });
+        return true;
+
       case 'CONTENT_EVENTS': {
         // Batch events from content scripts for upload
         if (!recordingActive) break;
@@ -817,9 +827,9 @@ async function checkEndpointStatus() {
     return;
   }
   try {
+    // Health check without sending API key (unauthenticated — prevents key leakage to misconfigured endpoints)
     const res = await fetch(`${eyedSettings.apiEndpoint}/health`, {
       signal: AbortSignal.timeout(5000),
-      headers: eyedSettings.apiKey ? { 'Authorization': `Bearer ${eyedSettings.apiKey}` } : {},
     });
     networkStatus = res.ok ? 'connected' : (res.status === 401 ? 'auth-error' : 'error');
   } catch {
@@ -844,24 +854,6 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
       }
     } catch {}
   });
-});
-
-/* ========== EXTENDED STATUS ========== */
-// Add network status to GET_RECORDING_STATE responses
-const _originalRecordingHandler = true; // Flag: extended handler below
-
-// Override the GET_RECORDING_STATE and GET_TRACKING_STATE to include network/queue info
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.type === 'GET_NETWORK_STATUS') {
-    sendResponse({
-      network: networkStatus,
-      queueSize: EyedUploader.getQueueSize(),
-      screenshotQueue: EyedUploader.getScreenshotQueueSize(),
-      endpoint: eyedSettings?.apiEndpoint ? true : false,
-      hasKey: eyedSettings?.apiKey ? true : false,
-    });
-    return true;
-  }
 });
 
 console.log('EyeD service worker v1.3 initialized');

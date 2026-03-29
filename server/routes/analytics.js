@@ -59,9 +59,21 @@ router.post('/analytics/funnel', authenticate, (req, res) => {
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json({ error: 'urls array required' });
   }
+  if (urls.length > 50) return res.status(400).json({ error: 'Too many URLs (max 50)' });
+  for (const u of urls) {
+    if (typeof u !== 'string' || u.length > 2000) {
+      return res.status(400).json({ error: 'Invalid URL in list' });
+    }
+  }
 
   let events;
   if (sessionIds && Array.isArray(sessionIds) && sessionIds.length > 0) {
+    if (sessionIds.length > 100) return res.status(400).json({ error: 'Too many session IDs' });
+    for (const s of sessionIds) {
+      if (typeof s !== 'string' || s.length > 100) {
+        return res.status(400).json({ error: 'Invalid session ID' });
+      }
+    }
     const placeholders = sessionIds.map(() => '?').join(',');
     events = db.prepare(
       `SELECT session_id, type, timestamp, url FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp`
@@ -87,6 +99,9 @@ router.post('/analytics/funnel', authenticate, (req, res) => {
 router.post('/analytics/compare', authenticate, (req, res) => {
   const { url1, url2, sessionIds } = req.body;
   if (!url1 || !url2) return res.status(400).json({ error: 'url1 and url2 required' });
+  if (typeof url1 !== 'string' || url1.length > 2000 || typeof url2 !== 'string' || url2.length > 2000) {
+    return res.status(400).json({ error: 'Invalid URL' });
+  }
 
   let baseQuery = 'SELECT type, timestamp, x, y, url FROM events';
   let whereClause = '';
@@ -113,7 +128,7 @@ router.post('/analytics/compare', authenticate, (req, res) => {
 
 // GET /analytics/timeline/:sessionId — gaze timeline
 router.get('/analytics/timeline/:sessionId', authenticate, (req, res) => {
-  const bucketMs = Math.max(100, parseInt(req.query.bucket) || 1000);
+  const bucketMs = Math.max(100, Math.min(parseInt(req.query.bucket) || 1000, 60000));
 
   const gaze = db.prepare(
     'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp'

@@ -78,7 +78,12 @@ router.post('/screenshots', authenticate, (req, res) => {
     // Save to disk with random filename
     const filename = `${sessionId}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}.${ext}`;
     const filePath = path.join(config.screenshotDir, filename);
-    fs.writeFileSync(filePath, imgBuffer);
+    try {
+      fs.writeFileSync(filePath, imgBuffer);
+    } catch (err) {
+      console.error('Screenshot write failed:', err);
+      return res.status(500).json({ error: 'Failed to save screenshot' });
+    }
 
     // Ensure session exists
     ensureSession.run(sessionId, req.apiKey.id, Date.now());
@@ -102,12 +107,23 @@ router.get('/screenshots/:id', authenticate, (req, res) => {
   const row = getScreenshot.get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Screenshot not found' });
 
-  const filePath = path.join(config.screenshotDir, row.file_path);
+  // Path traversal protection: ensure filename has no directory separators
+  const basename = path.basename(row.file_path);
+  if (basename !== row.file_path) {
+    return res.status(400).json({ error: 'Invalid screenshot path' });
+  }
+
+  const filePath = path.resolve(config.screenshotDir, basename);
+  // Double-check resolved path is within screenshot dir
+  if (!filePath.startsWith(path.resolve(config.screenshotDir))) {
+    return res.status(400).json({ error: 'Invalid screenshot path' });
+  }
+
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Screenshot file missing' });
   }
 
-  const ext = path.extname(row.file_path).slice(1);
+  const ext = path.extname(basename).slice(1);
   const mime = { jpeg: 'image/jpeg', jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' };
   res.set('Content-Type', mime[ext] || 'image/jpeg');
   res.sendFile(filePath);
@@ -115,6 +131,13 @@ router.get('/screenshots/:id', authenticate, (req, res) => {
 
 // GET /screenshots/session/:sessionId — list screenshots for session
 router.get('/screenshots/session/:sessionId', authenticate, (req, res) => {
+  // Authorization: check session belongs to this API key
+  const session = db.prepare('SELECT api_key_id FROM sessions WHERE id = ?').get(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (session.api_key_id !== req.apiKey.id && !req.apiKey.scopes?.includes('admin')) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = parseInt(req.query.offset) || 0;
   const rows = listScreenshots.all(req.params.sessionId, limit, offset);

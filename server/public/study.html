@@ -14,36 +14,6 @@
     <div id="content"><p style="color:var(--text-muted)">Loading...</p></div>
   </div>
   <script src="/js/dashboard.js"></script>
-  <script>
-    const studyId = location.pathname.split('/').pop();
-    (async () => {
-      try {
-        const res = await api(`/studies/${studyId}`);
-        const { study, participants } = await res.json();
-        const aggRes = await api(`/studies/${studyId}/aggregate`);
-        const { aggregate } = await aggRes.json();
-        document.getElementById('content').innerHTML = `
-          <h2>${esc(study.name)}</h2>
-          <p style="color:var(--text-muted);margin-bottom:24px">${esc(study.description)}</p>
-          <div class="card-grid">
-            <div class="card"><div class="label">Sessions</div><div class="value">${aggregate.sessions}</div></div>
-            <div class="card"><div class="label">Total Events</div><div class="value">${fmtNum(aggregate.totalEvents)}</div></div>
-            <div class="card"><div class="label">Gaze Points</div><div class="value">${fmtNum(aggregate.gazePoints)}</div></div>
-            <div class="card"><div class="label">Fixations</div><div class="value">${aggregate.fixations}</div></div>
-            <div class="card"><div class="label">Engagement</div><div class="value">${aggregate.engagement?.score || 0}</div></div>
-            <div class="card"><div class="label">Participants</div><div class="value">${participants.length}</div></div>
-          </div>
-          <h3 style="margin:24px 0 12px">Groups</h3>
-          <div class="card-grid">
-            ${Object.entries(aggregate.groups || {}).map(([g, s]) => `
-              <div class="card"><div class="label">${esc(g)}</div><div class="value">${s.participants} / ${s.sessions} sessions</div></div>
-            `).join('') || '<div class="card"><p style="color:var(--text-muted)">No groups</p></div>'}
-          </div>
-        `;
-      } catch (err) {
-        document.getElementById('content').innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
-      }
-    })();
-  </script>
+  <script src="/js/study.js"></script>
 </body>
 </html>

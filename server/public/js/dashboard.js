@@ -2,8 +2,8 @@
  * EyeD Dashboard — client-side logic.
  */
 
-const API_KEY = localStorage.getItem('eyed_dashboard_key') || '';
-const MASTER_KEY = localStorage.getItem('eyed_master_key') || '';
+const API_KEY = sessionStorage.getItem('eyed_dashboard_key') || '';
+const MASTER_KEY = sessionStorage.getItem('eyed_master_key') || '';
 
 function authHeaders() {
   const key = MASTER_KEY || API_KEY;
@@ -27,9 +27,9 @@ if (!API_KEY && !MASTER_KEY) {
   const key = prompt('Enter your EyeD API key or master key:');
   if (key) {
     if (key.startsWith('eyed_')) {
-      localStorage.setItem('eyed_dashboard_key', key);
+      sessionStorage.setItem('eyed_dashboard_key', key);
     } else {
-      localStorage.setItem('eyed_master_key', key);
+      sessionStorage.setItem('eyed_master_key', key);
     }
     location.reload();
   }
@@ -62,7 +62,8 @@ const liveFeed = document.getElementById('live-feed');
 
 function connectWs() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  ws = new WebSocket(`${proto}//${location.host}/api/ws/live`);
+  const wsKey = encodeURIComponent(MASTER_KEY || API_KEY);
+  ws = new WebSocket(`${proto}//${location.host}/api/ws/live?key=${wsKey}`);
   const badge = document.getElementById('ws-status');
 
   ws.onopen = () => {

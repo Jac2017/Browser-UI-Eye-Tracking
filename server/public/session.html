@@ -14,17 +14,6 @@
     <div id="content"><p style="color:var(--text-muted)">Loading...</p></div>
   </div>
   <script src="/js/dashboard.js"></script>
-  <script>
-    const sessionId = location.pathname.split('/').pop();
-    (async () => {
-      try {
-        const res = await api(`/sessions/${sessionId}/summary`);
-        const { summary } = await res.json();
-        renderSummary(summary, document.getElementById('content'));
-      } catch (err) {
-        document.getElementById('content').innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
-      }
-    })();
-  </script>
+  <script src="/js/session.js"></script>
 </body>
 </html>
