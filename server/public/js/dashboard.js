@@ -255,13 +255,13 @@ async function loadAnalytics() {
       const data = await res.json();
       el.innerHTML = `
         <div class="card-grid">
-          <div class="card"><div class="label">Fixations</div><div class="value">${data.count}</div></div>
-          <div class="card"><div class="label">Avg Duration</div><div class="value">${data.avgDuration}ms</div></div>
+          <div class="card"><div class="label">Fixations</div><div class="value">${fmtNum(data.count)}</div></div>
+          <div class="card"><div class="label">Avg Duration</div><div class="value">${fmtNum(data.avgDuration)}ms</div></div>
         </div>
         <div class="card" style="max-height:400px;overflow-y:auto">
           <table><tr><th>#</th><th>X</th><th>Y</th><th>Duration</th><th>Points</th></tr>
           ${data.fixations.slice(0, 100).map((f, i) => `
-            <tr><td>${i+1}</td><td>${f.x.toFixed(3)}</td><td>${f.y.toFixed(3)}</td><td>${f.duration}ms</td><td>${f.pointCount}</td></tr>
+            <tr><td>${i+1}</td><td>${esc(f.x.toFixed(3))}</td><td>${esc(f.y.toFixed(3))}</td><td>${fmtNum(f.duration)}ms</td><td>${fmtNum(f.pointCount)}</td></tr>
           `).join('')}
           </table>
         </div>
@@ -411,9 +411,9 @@ async function runFunnel() {
       <div class="funnel-step">
         <span class="funnel-label">${i+1}. ${esc(step.url)}</span>
         <div class="funnel-bar" style="width:${(step.sessions/maxSessions*100).toFixed(0)}%;background:${step.dropoffRate > 50 ? 'var(--red)' : 'var(--accent)'}">
-          ${step.sessions}
+          ${fmtNum(step.sessions)}
         </div>
-        <span class="funnel-meta">${step.dropoffRate}% drop</span>
+        <span class="funnel-meta">${esc(String(step.dropoffRate))}% drop</span>
       </div>
     `).join('');
   } catch (err) {
@@ -463,8 +463,8 @@ async function loadStudies() {
             <td>${esc(String(s.participant_count))}</td>
             <td>${(s.target_urls || []).length} URLs</td>
             <td>
-              <button class="btn" onclick="viewStudy(${s.id})" style="padding:4px 10px;font-size:12px">View</button>
-              <button class="btn" onclick="exportStudy(${s.id})" style="padding:4px 10px;font-size:12px">Export</button>
+              <button class="btn" onclick="viewStudy(${Number(s.id)})" style="padding:4px 10px;font-size:12px">View</button>
+              <button class="btn" onclick="exportStudy(${Number(s.id)})" style="padding:4px 10px;font-size:12px">Export</button>
             </td>
           </tr>
         `).join('')}
@@ -507,7 +507,7 @@ async function viewStudy(id) {
       <h2>${esc(study.name)}</h2>
       <p style="color:var(--text-muted);margin-bottom:16px">${esc(study.description)}</p>
       <div class="card-grid" style="margin-bottom:16px">
-        <div class="card"><div class="label">Participants</div><div class="value">${study.participant_count}</div></div>
+        <div class="card"><div class="label">Participants</div><div class="value">${fmtNum(study.participant_count)}</div></div>
         <div class="card"><div class="label">Status</div><div class="value">${esc(study.status)}</div></div>
       </div>
       <h3 style="margin-bottom:8px">Participants</h3>
@@ -543,7 +543,7 @@ async function loadKeys() {
             <td>${fmtNum(k.total_events)}</td>
             <td><span class="pill ${k.active ? 'active' : 'ended'}">${k.active ? 'active' : 'disabled'}</span></td>
             <td>
-              <button class="btn ${k.active ? 'danger' : ''}" onclick="toggleKey(${k.id}, ${k.active})" style="padding:4px 10px;font-size:12px">
+              <button class="btn ${k.active ? 'danger' : ''}" onclick="toggleKey(${Number(k.id)}, ${k.active ? 1 : 0})" style="padding:4px 10px;font-size:12px">
                 ${k.active ? 'Disable' : 'Enable'}
               </button>
             </td>
@@ -612,13 +612,13 @@ async function loadWebhooks() {
         ${webhooks.map(w => `
           <tr>
             <td style="word-break:break-all;max-width:300px">${esc(w.url)}</td>
-            <td>${(w.events || []).join(', ')}</td>
+            <td>${esc((w.events || []).join(', '))}</td>
             <td><span class="pill ${w.active ? 'active' : 'ended'}">${w.active ? 'active' : 'disabled'}</span></td>
-            <td>${w.last_triggered_at || '—'}</td>
-            <td>${w.failure_count}</td>
+            <td>${esc(w.last_triggered_at || '—')}</td>
+            <td>${fmtNum(w.failure_count)}</td>
             <td>
-              <button class="btn" onclick="toggleWebhook(${w.id})" style="padding:4px 10px;font-size:12px">Toggle</button>
-              <button class="btn danger" onclick="deleteWebhook(${w.id})" style="padding:4px 10px;font-size:12px">Delete</button>
+              <button class="btn" onclick="toggleWebhook(${Number(w.id)})" style="padding:4px 10px;font-size:12px">Toggle</button>
+              <button class="btn danger" onclick="deleteWebhook(${Number(w.id)})" style="padding:4px 10px;font-size:12px">Delete</button>
             </td>
           </tr>
         `).join('')}
