@@ -17,8 +17,9 @@ const express = require('express');
 const expressWs = require('express-ws');
 const helmet = require('helmet');
 const path = require('path');
-const db = require('./models/db');
+const { db } = require('./models/db');
 const config = require('./config');
+const monitor = require('./services/monitor');
 
 const app = express();
 expressWs(app);
@@ -36,6 +37,10 @@ app.use(helmet({
   },
 }));
 
+// DevOps monitoring — request tracking middleware (before routes)
+monitor.setDb(db);
+app.use(monitor.requestTracker);
+
 // Body parsing — large limit for encrypted screenshot payloads
 app.use(express.json({ limit: '10mb' }));
 
@@ -52,6 +57,7 @@ app.use('/api', require('./routes/studies'));
 app.use('/api', require('./routes/analytics'));
 app.use('/api', require('./routes/export'));
 app.use('/api', require('./routes/webhooks'));
+app.use('/api', require('./routes/monitor'));
 app.use('/api/ws', require('./routes/websocket'));
 
 // Dashboard views
@@ -61,6 +67,8 @@ const PORT = config.port;
 app.listen(PORT, () => {
   console.log(`EyeD server running on http://localhost:${PORT}`);
   console.log(`Dashboard: http://localhost:${PORT}/dashboard`);
+  console.log(`Monitor:   http://localhost:${PORT}/monitoring.html`);
+  monitor.start();
 });
 
 module.exports = app;
