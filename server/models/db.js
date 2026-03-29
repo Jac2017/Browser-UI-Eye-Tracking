@@ -214,6 +214,31 @@ function initialize() {
     CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback(category);
     CREATE INDEX IF NOT EXISTS idx_feedback_priority ON feedback(priority);
     CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
+
+    -- Invitations (participant email management & onboarding)
+    CREATE TABLE IF NOT EXISTS invitations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      study_id INTEGER NOT NULL REFERENCES studies(id),
+      email TEXT NOT NULL,
+      participant_id TEXT DEFAULT '',
+      group_name TEXT DEFAULT 'default',
+      token TEXT UNIQUE NOT NULL,
+      status TEXT DEFAULT 'pending',
+      sent_at TEXT,
+      opened_at TEXT,
+      installed_at TEXT,
+      consent_given INTEGER DEFAULT 0,
+      consent_at TEXT,
+      reminder_count INTEGER DEFAULT 0,
+      last_reminder_at TEXT,
+      metadata TEXT DEFAULT '{}',
+      created_at TEXT DEFAULT (datetime('now')),
+      UNIQUE(study_id, email)
+    );
+    CREATE INDEX IF NOT EXISTS idx_invitations_study ON invitations(study_id);
+    CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
+    CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
+    CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
   `);
 
   console.log('Database initialized');

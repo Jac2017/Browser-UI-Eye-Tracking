@@ -101,6 +101,7 @@ function initApp() {
         case 'analytics': loadSessionList(); loadOverlaySessionList(); loadReplaySessionList(); break;
         case 'tasks': loadTaskStudies(); break;
         case 'forms': loadFormSessionList(); break;
+        case 'participants': loadInviteStudies(); break;
         case 'feedback': loadFeedback(); break;
       }
     });
@@ -1790,6 +1791,293 @@ async function loadFormAnalytics() {
     el.innerHTML = html;
   } catch (err) {
     el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== PARTICIPANT / INVITATION MANAGEMENT ========== */
+
+async function loadInviteStudies() {
+  try {
+    const res = await api('/studies?limit=100');
+    const data = await res.json();
+    const sel = document.getElementById('inv-study');
+    sel.innerHTML = '<option value="">Select study...</option>';
+    (data.studies || data).forEach(s => {
+      sel.innerHTML += `<option value="${s.id}">${esc(s.name)}</option>`;
+    });
+  } catch (e) {}
+}
+
+async function loadInvitations() {
+  const studyId = document.getElementById('inv-study').value;
+  if (!studyId) return;
+
+  const status = document.getElementById('inv-filter-status').value;
+  const search = document.getElementById('inv-search').value.trim();
+
+  const params = new URLSearchParams({ studyId });
+  if (status) params.set('status', status);
+  if (search) params.set('search', search);
+  params.set('limit', 100);
+
+  try {
+    const res = await api(`/invitations?${params}`);
+    const data = await res.json();
+    renderInviteStats(data.stats);
+    renderInvitationsTable(data.invitations);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function renderInviteStats(stats) {
+  const el = document.getElementById('invite-stats-cards');
+  if (!stats) return;
+  el.innerHTML = `
+    <div class="card"><div class="label">Total</div><div class="value">${fmtNum(stats.total)}</div></div>
+    <div class="card"><div class="label">Pending</div><div class="value">${fmtNum(stats.pending)}</div></div>
+    <div class="card"><div class="label">Sent</div><div class="value">${fmtNum(stats.sent)}</div></div>
+    <div class="card"><div class="label">Opened</div><div class="value" style="color:var(--yellow)">${fmtNum(stats.opened)}</div></div>
+    <div class="card"><div class="label">Installed</div><div class="value" style="color:var(--green)">${fmtNum(stats.installed)}</div></div>
+    <div class="card"><div class="label">Consented</div><div class="value" style="color:var(--blue)">${fmtNum(stats.consented)}</div></div>
+  `;
+}
+
+function renderInvitationsTable(items) {
+  const el = document.getElementById('invitations-table');
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="empty-state">No participants found. Add emails to get started.</div>';
+    return;
+  }
+  const statusColors = {
+    pending: '#8b949e', sent: '#388bfd', opened: '#d29922',
+    installed: '#3fb950', active: '#238636',
+  };
+  let html = `<table style="width:100%;font-size:13px;border-collapse:collapse">
+    <tr>
+      <th style="text-align:left">Email</th>
+      <th>Participant ID</th>
+      <th>Group</th>
+      <th>Status</th>
+      <th>Consent</th>
+      <th>Sent</th>
+      <th>Opened</th>
+      <th>Installed</th>
+      <th>Reminders</th>
+      <th></th>
+    </tr>`;
+  for (const inv of items) {
+    const color = statusColors[inv.status] || '#8b949e';
+    html += `<tr>
+      <td style="font-weight:500">${esc(inv.email)}</td>
+      <td style="font-size:11px;color:var(--muted)">${esc(inv.participant_id)}</td>
+      <td style="text-align:center">${esc(inv.group_name)}</td>
+      <td style="text-align:center"><span class="badge-status" style="background:${color};color:#fff">${inv.status}</span></td>
+      <td style="text-align:center">${inv.consent_given ? '✓' : '—'}</td>
+      <td style="font-size:11px;text-align:center">${inv.sent_at ? new Date(inv.sent_at).toLocaleDateString() : '—'}</td>
+      <td style="font-size:11px;text-align:center">${inv.opened_at ? new Date(inv.opened_at).toLocaleDateString() : '—'}</td>
+      <td style="font-size:11px;text-align:center">${inv.installed_at ? new Date(inv.installed_at).toLocaleDateString() : '—'}</td>
+      <td style="text-align:center">${inv.reminder_count}</td>
+      <td><button class="btn" style="font-size:11px;padding:2px 6px" onclick="deleteInvitation(${inv.id})">✕</button></td>
+    </tr>`;
+  }
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+function showAddParticipants() {
+  const studyId = document.getElementById('inv-study').value;
+  if (!studyId) { toast('Select a study first', 'error'); return; }
+
+  showModal(`
+    <h2 style="margin-bottom:16px">Add Participants</h2>
+    <p style="margin-bottom:12px;color:var(--muted);font-size:13px">
+      Enter email addresses — one per line, comma-separated, or semicolon-separated.
+    </p>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Email Addresses</label>
+      <textarea id="add-emails" rows="8" style="width:100%;resize:vertical;font-family:monospace;font-size:13px" placeholder="alice@example.com&#10;bob@university.edu&#10;charlie@lab.org"></textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label>Group (optional)</label>
+      <input type="text" id="add-group" value="default" placeholder="e.g. control, treatment-a">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="submitAddParticipants(${studyId})">Add to Study</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+
+async function submitAddParticipants(studyId) {
+  const emails = document.getElementById('add-emails').value.trim();
+  const groupName = document.getElementById('add-group').value.trim();
+  if (!emails) { toast('Enter at least one email', 'error'); return; }
+
+  try {
+    const res = await api('/invitations', {
+      method: 'POST',
+      body: JSON.stringify({ studyId, emails, groupName }),
+    });
+    const data = await res.json();
+    toast(`Added ${data.added}, skipped ${data.skipped} duplicate(s)`, 'success');
+    closeModal();
+    loadInvitations();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function showImportCsv() {
+  const studyId = document.getElementById('inv-study').value;
+  if (!studyId) { toast('Select a study first', 'error'); return; }
+
+  showModal(`
+    <h2 style="margin-bottom:16px">Import Participants from CSV</h2>
+    <p style="margin-bottom:12px;color:var(--muted);font-size:13px">
+      Paste CSV content below. Each row should contain an email address.
+      Supports formats: <code>email</code>, <code>name,email</code>, or <code>email,name</code>.
+    </p>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>CSV Data</label>
+      <textarea id="csv-data" rows="10" style="width:100%;resize:vertical;font-family:monospace;font-size:12px" placeholder="name,email&#10;Alice Smith,alice@example.com&#10;Bob Jones,bob@university.edu"></textarea>
+    </div>
+    <div class="form-group" style="margin-bottom:12px">
+      <label>Or upload a file</label>
+      <input type="file" id="csv-file" accept=".csv,.txt" onchange="loadCsvFile()">
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label>Group</label>
+      <input type="text" id="csv-group" value="default">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="submitImportCsv(${studyId})">Import</button>
+      <button class="btn" onclick="closeModal()">Cancel</button>
+    </div>
+  `);
+}
+
+function loadCsvFile() {
+  const file = document.getElementById('csv-file').files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => { document.getElementById('csv-data').value = e.target.result; };
+  reader.readAsText(file);
+}
+
+async function submitImportCsv(studyId) {
+  const csv = document.getElementById('csv-data').value.trim();
+  const groupName = document.getElementById('csv-group').value.trim();
+  if (!csv) { toast('Paste or upload CSV data', 'error'); return; }
+
+  try {
+    const res = await api('/invitations/import-csv', {
+      method: 'POST',
+      body: JSON.stringify({ studyId, csv, groupName }),
+    });
+    const data = await res.json();
+    let msg = `Imported ${data.added} participant(s)`;
+    if (data.skipped > 0) msg += `, ${data.skipped} skipped`;
+    if (data.invalid && data.invalid.length > 0) msg += `. Invalid lines: ${data.invalid.length}`;
+    toast(msg, data.added > 0 ? 'success' : 'info');
+    closeModal();
+    loadInvitations();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function sendInvitations() {
+  const studyId = document.getElementById('inv-study').value;
+  if (!studyId) { toast('Select a study first', 'error'); return; }
+
+  if (!confirm('Send invitation emails to all unsent participants?')) return;
+
+  try {
+    const res = await api('/invitations/send', {
+      method: 'POST',
+      body: JSON.stringify({ studyId }),
+    });
+    const data = await res.json();
+    let msg = `Sent: ${data.sent}`;
+    if (data.failed > 0) msg += `, Failed: ${data.failed}`;
+    toast(msg, data.failed > 0 ? 'error' : 'success');
+    loadInvitations();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function sendReminders() {
+  const studyId = document.getElementById('inv-study').value;
+  if (!studyId) { toast('Select a study first', 'error'); return; }
+
+  if (!confirm('Send reminders to participants who haven\'t installed yet?')) return;
+
+  try {
+    const res = await api('/invitations/send-reminder', {
+      method: 'POST',
+      body: JSON.stringify({ studyId }),
+    });
+    const data = await res.json();
+    toast(`Reminders sent: ${data.sent}, failed: ${data.failed}`, data.sent > 0 ? 'success' : 'info');
+    loadInvitations();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function showSmtpTest() {
+  showModal(`
+    <h2 style="margin-bottom:16px">Test SMTP Configuration</h2>
+    <p style="margin-bottom:12px;color:var(--muted);font-size:13px">
+      Verify your email configuration. Set these environment variables on the server:
+    </p>
+    <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:12px;margin-bottom:16px;font-family:monospace;font-size:12px;line-height:2">
+      EYED_SMTP_HOST=smtp.gmail.com<br>
+      EYED_SMTP_PORT=587<br>
+      EYED_SMTP_USER=your@email.com<br>
+      EYED_SMTP_PASS=app-password<br>
+      EYED_SMTP_FROM_EMAIL=your@email.com<br>
+      EYED_PUBLIC_URL=https://your-server.com
+    </div>
+    <div class="form-group" style="margin-bottom:16px">
+      <label>Send test email to (optional)</label>
+      <input type="email" id="smtp-test-email" placeholder="test@example.com">
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn primary" onclick="testSmtp()">Test Connection</button>
+      <button class="btn" onclick="closeModal()">Close</button>
+    </div>
+    <div id="smtp-test-result" style="margin-top:12px"></div>
+  `);
+}
+
+async function testSmtp() {
+  const testEmail = document.getElementById('smtp-test-email').value.trim();
+  const resultEl = document.getElementById('smtp-test-result');
+  resultEl.innerHTML = '<span class="spinner"></span> Testing...';
+
+  try {
+    const res = await api('/invitations/test-smtp', {
+      method: 'POST',
+      body: JSON.stringify({ testEmail: testEmail || undefined }),
+    });
+    const data = await res.json();
+    resultEl.innerHTML = `<span style="color:var(--green)">${esc(data.message)}</span>`;
+  } catch (err) {
+    resultEl.innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`;
+  }
+}
+
+async function deleteInvitation(id) {
+  if (!confirm('Remove this participant from the invitation list?')) return;
+  try {
+    await api(`/invitations/${id}`, { method: 'DELETE' });
+    toast('Removed', 'success');
+    loadInvitations();
+  } catch (err) {
+    toast(err.message, 'error');
   }
 }
 

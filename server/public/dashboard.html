@@ -39,6 +39,7 @@
         <div class="tab" data-tab="webhooks">Webhooks</div>
         <div class="tab" data-tab="tasks">Tasks</div>
         <div class="tab" data-tab="forms">Forms</div>
+        <div class="tab" data-tab="participants">Participants</div>
         <div class="tab" data-tab="feedback">Feedback</div>
         <div class="tab" data-tab="live">Live</div>
       </div>
@@ -322,6 +323,54 @@
         </div>
         <div id="form-analytics-result">
           <div class="empty-state">Select a session to analyze form interactions.</div>
+        </div>
+      </div>
+
+      <!-- Participants / Invitations Tab -->
+      <div class="tab-content" id="tab-participants">
+        <!-- SMTP Status -->
+        <div class="card-grid" id="invite-stats-cards"></div>
+
+        <!-- Study selector + actions -->
+        <div class="filter-panel" style="margin-top:16px">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Study</label>
+              <select id="inv-study" onchange="loadInvitations()"></select>
+            </div>
+            <div class="form-group">
+              <label>Status</label>
+              <select id="inv-filter-status" onchange="loadInvitations()">
+                <option value="">All</option>
+                <option value="pending">Pending</option>
+                <option value="sent">Sent</option>
+                <option value="opened">Opened</option>
+                <option value="installed">Installed</option>
+                <option value="active">Active</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Search</label>
+              <input type="text" id="inv-search" placeholder="Search email..." onkeydown="if(event.key==='Enter')loadInvitations()">
+            </div>
+            <div class="form-group form-group-end">
+              <button class="btn primary" onclick="loadInvitations()">Filter</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn primary" onclick="showAddParticipants()">Add Participants</button>
+          <button class="btn" onclick="showImportCsv()">Import CSV</button>
+          <button class="btn" onclick="sendInvitations()">Send Unsent Invitations</button>
+          <button class="btn" onclick="sendReminders()">Send Reminders</button>
+          <button class="btn" onclick="showSmtpTest()">Test SMTP</button>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrap" id="invitations-table">
+          <div class="empty-state">Select a study to manage participants.</div>
         </div>
       </div>
 

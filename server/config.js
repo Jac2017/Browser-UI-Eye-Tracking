@@ -20,4 +20,17 @@ module.exports = {
   // Rate limiting
   rateLimitWindow: 60 * 1000, // 1 minute
   rateLimitMax: 120, // requests per window per key
+
+  // Email / SMTP configuration (for participant invitations)
+  smtp: {
+    host: process.env.EYED_SMTP_HOST || '',
+    port: parseInt(process.env.EYED_SMTP_PORT) || 587,
+    secure: process.env.EYED_SMTP_SECURE === 'true',
+    user: process.env.EYED_SMTP_USER || '',
+    pass: process.env.EYED_SMTP_PASS || '',
+    fromName: process.env.EYED_SMTP_FROM_NAME || 'EyeD Research',
+    fromEmail: process.env.EYED_SMTP_FROM_EMAIL || '',
+  },
+  // Public URL for onboarding links
+  publicUrl: process.env.EYED_PUBLIC_URL || `http://localhost:${process.env.EYED_PORT || 3200}`,
 };

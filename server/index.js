@@ -60,6 +60,7 @@ app.use('/api', require('./routes/webhooks'));
 app.use('/api', require('./routes/tasks'));
 app.use('/api', require('./routes/monitor'));
 app.use('/api', require('./routes/feedback'));
+app.use('/api', require('./routes/invitations'));
 app.use('/api/ws', require('./routes/websocket'));
 
 // Dashboard views

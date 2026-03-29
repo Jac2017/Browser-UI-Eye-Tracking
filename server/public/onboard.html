@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Join Study — EyeD</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 40px 16px;
+    }
+    .container { max-width: 640px; width: 100%; }
+    .brand { text-align: center; margin-bottom: 32px; }
+    .brand h1 { font-size: 2.2rem; color: #58a6ff; }
+    .brand p { color: #8b949e; margin-top: 4px; }
+    .card {
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 20px;
+    }
+    .card h2 { font-size: 1.4rem; margin-bottom: 8px; }
+    .card p { color: #8b949e; line-height: 1.6; margin-bottom: 16px; }
+    .study-info {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 24px;
+    }
+    .study-info h3 { color: #58a6ff; margin-bottom: 6px; }
+    .study-info .desc { color: #8b949e; font-size: 14px; }
+    .study-info .meta { margin-top: 12px; font-size: 13px; color: #484f58; }
+    .meta span { margin-right: 16px; }
+    .steps { list-style: none; counter-reset: step; }
+    .steps li {
+      counter-increment: step;
+      position: relative;
+      padding: 16px 16px 16px 56px;
+      margin-bottom: 12px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .steps li.active { border-color: #58a6ff; background: #161b22; }
+    .steps li.done { border-color: #238636; }
+    .steps li::before {
+      content: counter(step);
+      position: absolute;
+      left: 16px;
+      top: 16px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #30363d;
+      color: #e6edf3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .steps li.active::before { background: #1f6feb; }
+    .steps li.done::before { background: #238636; content: '✓'; }
+    .steps li h4 { margin-bottom: 4px; font-size: 15px; }
+    .steps li p { margin: 0; font-size: 13px; color: #8b949e; }
+    .btn {
+      display: inline-block;
+      padding: 10px 24px;
+      border-radius: 6px;
+      border: 1px solid #30363d;
+      background: #21262d;
+      color: #e6edf3;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.15s;
+      text-decoration: none;
+    }
+    .btn:hover { background: #30363d; }
+    .btn.primary { background: #238636; border-color: #238636; color: #fff; }
+    .btn.primary:hover { background: #2ea043; }
+    .btn.large { padding: 14px 32px; font-size: 16px; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .consent-box {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 16px 0;
+      max-height: 200px;
+      overflow-y: auto;
+      font-size: 13px;
+      color: #8b949e;
+      line-height: 1.7;
+    }
+    .consent-check {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin: 12px 0;
+    }
+    .consent-check input { margin-top: 3px; }
+    .consent-check label { font-size: 14px; cursor: pointer; }
+    .config-display {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 16px;
+      margin: 16px 0;
+      font-family: 'SF Mono', Monaco, 'Consolas', monospace;
+      font-size: 13px;
+      word-break: break-all;
+    }
+    .config-display .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 0;
+      border-bottom: 1px solid #21262d;
+    }
+    .config-display .row:last-child { border-bottom: none; }
+    .config-display .label { color: #8b949e; font-size: 12px; text-transform: uppercase; }
+    .config-display .val { color: #58a6ff; }
+    .copy-btn {
+      padding: 4px 10px;
+      font-size: 11px;
+      margin-left: 8px;
+      border-radius: 4px;
+    }
+    .error-msg { color: #f85149; text-align: center; padding: 24px; }
+    .success-msg { color: #3fb950; }
+    .hidden { display: none; }
+    .center { text-align: center; }
+    .mt16 { margin-top: 16px; }
+    .mt8 { margin-top: 8px; }
+    .install-options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .install-option {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    .install-option:hover { border-color: #58a6ff; }
+    .install-option .icon { font-size: 32px; margin-bottom: 8px; }
+    .install-option h4 { font-size: 14px; margin-bottom: 4px; }
+    .install-option p { font-size: 12px; color: #8b949e; }
+    .progress-bar {
+      width: 100%;
+      height: 4px;
+      background: #21262d;
+      border-radius: 2px;
+      margin: 24px 0 8px;
+      overflow: hidden;
+    }
+    .progress-bar .fill {
+      height: 100%;
+      background: #58a6ff;
+      border-radius: 2px;
+      transition: width 0.5s ease;
+    }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #30363d;
+      border-top: 2px solid #58a6ff;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 500px) {
+      .install-options { grid-template-columns: 1fr; }
+      .card { padding: 20px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="brand">
+      <h1>EyeD</h1>
+      <p>Eye Tracking Research Platform</p>
+    </div>
+
+    <!-- Loading state -->
+    <div id="loading" class="card center">
+      <p><span class="spinner"></span> Loading invitation...</p>
+    </div>
+
+    <!-- Error state -->
+    <div id="error-state" class="card hidden">
+      <div class="error-msg" id="error-text"></div>
+    </div>
+
+    <!-- Main onboarding flow -->
+    <div id="onboard-flow" class="hidden">
+      <!-- Study Info -->
+      <div class="study-info">
+        <h3 id="ob-study-name"></h3>
+        <div class="desc" id="ob-study-desc"></div>
+        <div class="meta">
+          <span>Participant: <strong id="ob-pid"></strong></span>
+          <span>Group: <strong id="ob-group"></strong></span>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-bar"><div class="fill" id="progress-fill" style="width:0%"></div></div>
+      <p style="font-size:12px;color:#484f58;text-align:right" id="progress-label">Step 1 of 3</p>
+
+      <!-- Step List -->
+      <ol class="steps" id="step-list">
+        <li id="step-1" class="active">
+          <h4>Review & Consent</h4>
+          <p>Read the participation details and give your consent</p>
+        </li>
+        <li id="step-2">
+          <h4>Install Extension</h4>
+          <p>Add the EyeD Chrome extension to your browser</p>
+        </li>
+        <li id="step-3">
+          <h4>Configure & Start</h4>
+          <p>Auto-configure the extension for this study</p>
+        </li>
+      </ol>
+
+      <!-- Step 1: Consent -->
+      <div id="panel-1" class="card">
+        <h2>Participation Consent</h2>
+        <div class="consent-box">
+          <p><strong>What data is collected:</strong></p>
+          <ul style="padding-left:20px;margin:8px 0">
+            <li>Eye gaze coordinates on web pages (if eye tracker connected)</li>
+            <li>Mouse movements and clicks</li>
+            <li>Scroll position and page navigation</li>
+            <li>Screenshots of web pages you visit during the study</li>
+            <li>Browser type and screen resolution</li>
+          </ul>
+          <p><strong>What is NOT collected:</strong></p>
+          <ul style="padding-left:20px;margin:8px 0">
+            <li>Passwords or form input content</li>
+            <li>Other browser tabs or personal files</li>
+            <li>Audio, video, or screen content outside the browser tab</li>
+            <li>Any data outside the tracked browser session</li>
+          </ul>
+          <p><strong>Your rights:</strong></p>
+          <ul style="padding-left:20px;margin:8px 0">
+            <li>Participation is voluntary — you can stop at any time</li>
+            <li>You can request deletion of your data at any time</li>
+            <li>You can export your own data before it is deleted</li>
+            <li>You may uninstall the extension at any time</li>
+          </ul>
+        </div>
+        <div class="consent-check">
+          <input type="checkbox" id="consent-cb">
+          <label for="consent-cb">I have read and understand the above. I voluntarily agree to participate in this study.</label>
+        </div>
+        <button class="btn primary large" id="btn-consent" disabled>Give Consent & Continue</button>
+      </div>
+
+      <!-- Step 2: Install -->
+      <div id="panel-2" class="card hidden">
+        <h2>Install the Extension</h2>
+        <p>Choose how to install the EyeD extension in your Chrome browser:</p>
+        <div class="install-options">
+          <div class="install-option" id="opt-crx" onclick="downloadCrx()">
+            <div class="icon">📦</div>
+            <h4>Download Package</h4>
+            <p>Download the extension .zip and load it manually</p>
+          </div>
+          <div class="install-option" id="opt-manual" onclick="showManualInstall()">
+            <div class="icon">🔧</div>
+            <h4>Manual Install</h4>
+            <p>Step-by-step instructions for developer mode</p>
+          </div>
+        </div>
+        <div id="manual-instructions" class="hidden" style="margin-top:16px">
+          <div class="consent-box" style="max-height:none">
+            <ol style="padding-left:20px;line-height:2">
+              <li>Download the extension files from your researcher or the project repository</li>
+              <li>Open Chrome and navigate to <code>chrome://extensions</code></li>
+              <li>Enable <strong>Developer mode</strong> (toggle in top-right corner)</li>
+              <li>Click <strong>Load unpacked</strong></li>
+              <li>Select the <code>extension/</code> folder from the downloaded files</li>
+              <li>The EyeD icon will appear in your browser toolbar</li>
+              <li>Pin it by clicking the puzzle-piece icon, then the pin next to EyeD</li>
+            </ol>
+          </div>
+        </div>
+        <div class="center mt16">
+          <button class="btn primary" id="btn-installed" onclick="markInstalled()">I've Installed the Extension →</button>
+        </div>
+      </div>
+
+      <!-- Step 3: Configure -->
+      <div id="panel-3" class="card hidden">
+        <h2>Configure the Extension</h2>
+        <p>Copy these settings into your EyeD extension. Click the gear icon in the extension popup, then paste each value.</p>
+        <div class="config-display" id="config-display"></div>
+        <div class="center mt16">
+          <button class="btn primary" id="btn-copy-all" onclick="copyAllConfig()">Copy All Settings</button>
+        </div>
+        <div class="mt16" style="background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:16px">
+          <h4 style="margin-bottom:8px;font-size:14px">Auto-Configure (Quick Setup)</h4>
+          <p style="font-size:13px;color:#8b949e;margin-bottom:12px">
+            If the extension is installed, click below to auto-configure it via the browser.
+            This will set the server URL, API key, and participant ID automatically.
+          </p>
+          <button class="btn primary" onclick="autoConfigureExtension()">Auto-Configure Extension</button>
+          <span id="auto-config-status" style="margin-left:12px;font-size:13px"></span>
+        </div>
+      </div>
+
+      <!-- Complete -->
+      <div id="panel-complete" class="card hidden center">
+        <div style="font-size:48px;margin-bottom:16px">✅</div>
+        <h2>You're All Set!</h2>
+        <p class="mt8">The extension is configured and ready to go. You can now start browsing normally — EyeD will record your interactions when tracking is active.</p>
+        <div class="mt16" style="font-size:13px;color:#8b949e">
+          <p><strong>Quick tips:</strong></p>
+          <ul style="text-align:left;display:inline-block;padding-left:20px;margin-top:8px;line-height:2">
+            <li>Click the EyeD icon in your toolbar to start/stop recording</li>
+            <li>The green dot means tracking is active</li>
+            <li>You can send feedback anytime via the extension popup</li>
+            <li>To stop participating, simply uninstall the extension</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const token = params.get('token');
+let studyConfig = {};
+let currentStep = 1;
+
+async function init() {
+  if (!token) {
+    showError('No invitation token found. Please use the link from your invitation email.');
+    return;
+  }
+
+  try {
+    const res = await fetch(`/api/onboard/validate?token=${encodeURIComponent(token)}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showError(err.error || 'Invalid or expired invitation.');
+      return;
+    }
+
+    studyConfig = await res.json();
+    document.getElementById('ob-study-name').textContent = studyConfig.studyName;
+    document.getElementById('ob-study-desc').textContent = studyConfig.studyDescription || 'No description provided.';
+    document.getElementById('ob-pid').textContent = studyConfig.participantId;
+    document.getElementById('ob-group').textContent = studyConfig.groupName;
+
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('onboard-flow').classList.remove('hidden');
+
+    if (studyConfig.alreadyConsented) {
+      goToStep(2);
+    }
+  } catch (err) {
+    showError('Cannot reach the server. Please try again later.');
+  }
+}
+
+function showError(msg) {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('error-state').classList.remove('hidden');
+  document.getElementById('error-text').textContent = msg;
+}
+
+function goToStep(step) {
+  currentStep = step;
+  // Update step indicators
+  for (let i = 1; i <= 3; i++) {
+    const el = document.getElementById(`step-${i}`);
+    el.classList.remove('active', 'done');
+    if (i < step) el.classList.add('done');
+    if (i === step) el.classList.add('active');
+  }
+  // Update panels
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`panel-${i}`).classList.toggle('hidden', i !== step);
+  }
+  document.getElementById('panel-complete').classList.add('hidden');
+  // Progress
+  const pct = Math.round(((step - 1) / 3) * 100);
+  document.getElementById('progress-fill').style.width = `${pct}%`;
+  document.getElementById('progress-label').textContent = `Step ${step} of 3`;
+}
+
+function showComplete() {
+  for (let i = 1; i <= 3; i++) {
+    document.getElementById(`step-${i}`).classList.remove('active');
+    document.getElementById(`step-${i}`).classList.add('done');
+    document.getElementById(`panel-${i}`).classList.add('hidden');
+  }
+  document.getElementById('panel-complete').classList.remove('hidden');
+  document.getElementById('progress-fill').style.width = '100%';
+  document.getElementById('progress-label').textContent = 'Complete!';
+}
+
+// Step 1: Consent
+document.getElementById('consent-cb').addEventListener('change', (e) => {
+  document.getElementById('btn-consent').disabled = !e.target.checked;
+});
+
+document.getElementById('btn-consent').addEventListener('click', async () => {
+  try {
+    await fetch('/api/onboard/consent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    goToStep(2);
+  } catch (err) {
+    alert('Failed to record consent. Please try again.');
+  }
+});
+
+// Step 2: Install
+function downloadCrx() {
+  // Trigger download of extension package if available
+  const link = document.createElement('a');
+  link.href = '/api/extension-package';
+  link.download = 'eyed-extension.zip';
+  link.click();
+}
+
+function showManualInstall() {
+  document.getElementById('manual-instructions').classList.toggle('hidden');
+}
+
+async function markInstalled() {
+  try {
+    await fetch('/api/onboard/installed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+  } catch (e) {}
+  goToStep(3);
+  renderConfigDisplay();
+}
+
+// Step 3: Configure
+function renderConfigDisplay() {
+  const el = document.getElementById('config-display');
+  const rows = [
+    { label: 'Server URL', value: studyConfig.serverUrl },
+    { label: 'API Key', value: studyConfig.apiKey || '(ask your researcher)' },
+    { label: 'Participant ID', value: studyConfig.participantId },
+  ];
+  el.innerHTML = rows.map(r => `
+    <div class="row">
+      <div>
+        <div class="label">${r.label}</div>
+        <div class="val">${r.value}</div>
+      </div>
+      <button class="btn copy-btn" onclick="copyText('${r.value}', this)">Copy</button>
+    </div>
+  `).join('');
+}
+
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+function copyAllConfig() {
+  const text = [
+    `Server URL: ${studyConfig.serverUrl}`,
+    `API Key: ${studyConfig.apiKey || '(ask your researcher)'}`,
+    `Participant ID: ${studyConfig.participantId}`,
+  ].join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('btn-copy-all');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy All Settings', 1500);
+  });
+}
+
+function autoConfigureExtension() {
+  const statusEl = document.getElementById('auto-config-status');
+  statusEl.innerHTML = '<span class="spinner"></span> Attempting auto-configure...';
+
+  // Try to communicate with the extension via custom event on the page
+  const configData = {
+    serverUrl: studyConfig.serverUrl,
+    apiKey: studyConfig.apiKey,
+    participantId: studyConfig.participantId,
+    studyName: studyConfig.studyName,
+  };
+
+  // Method 1: postMessage (extension content script can listen)
+  window.postMessage({ type: 'EYED_AUTO_CONFIG', config: configData }, '*');
+
+  // Method 2: Custom DOM event
+  const event = new CustomEvent('eyed-auto-config', { detail: configData });
+  document.dispatchEvent(event);
+
+  // Listen for acknowledgment
+  const timeout = setTimeout(() => {
+    statusEl.innerHTML = '<span style="color:#d29922">Extension did not respond. Please configure manually using the settings above, or make sure the extension is installed and refresh this page.</span>';
+  }, 3000);
+
+  window.addEventListener('message', function handler(e) {
+    if (e.data?.type === 'EYED_CONFIG_ACK') {
+      clearTimeout(timeout);
+      statusEl.innerHTML = '<span class="success-msg">Extension configured successfully!</span>';
+      window.removeEventListener('message', handler);
+      setTimeout(showComplete, 1500);
+    }
+  });
+}
+
+init();
+</script>
+</body>
+</html>
