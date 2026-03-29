@@ -87,6 +87,64 @@
         <button class="btn primary" onclick="runComparison()">Compare</button>
         <div id="compare-result" style="margin-top:16px"></div>
       </div>
+
+      <h3 style="margin:24px 0 12px">URL Heatmap Aggregation</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-row">
+          <div class="form-group" style="flex:2"><label>URL (partial match)</label><input id="url-heatmap-url" placeholder="/pricing"></div>
+          <div class="form-group">
+            <label>Device</label>
+            <select id="url-heatmap-device">
+              <option value="all">All Devices</option>
+              <option value="desktop">Desktop</option>
+              <option value="tablet">Tablet</option>
+              <option value="mobile">Mobile</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn primary" onclick="runUrlHeatmap()">Generate Heatmap</button>
+        <div id="url-heatmap-result" style="margin-top:16px"></div>
+      </div>
+
+      <h3 style="margin:24px 0 12px">Cohort Heatmap Comparison</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-row">
+          <div class="form-group" style="flex:2"><label>URL (partial match)</label><input id="cohort-url" placeholder="/landing"></div>
+          <div class="form-group">
+            <label>Study</label>
+            <select id="cohort-study"></select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Cohort Field</label>
+            <select id="cohort-field">
+              <option value="group">Group Name</option>
+              <option value="gender">gender (metadata)</option>
+              <option value="age_group">age_group (metadata)</option>
+              <option value="experience">experience (metadata)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Device</label>
+            <select id="cohort-device">
+              <option value="all">All Devices</option>
+              <option value="desktop">Desktop</option>
+              <option value="tablet">Tablet</option>
+              <option value="mobile">Mobile</option>
+            </select>
+          </div>
+        </div>
+        <button class="btn primary" onclick="runCohortHeatmap()">Compare Cohorts</button>
+        <div id="cohort-result" style="margin-top:16px"></div>
+      </div>
+
+      <h3 style="margin:24px 0 12px">Viewport Distribution</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-group"><label>URL (partial match)</label><input id="viewport-url" placeholder="/pricing"></div>
+        <button class="btn primary" onclick="runViewportDist()">Analyze</button>
+        <div id="viewport-result" style="margin-top:16px"></div>
+      </div>
     </div>
 
     <!-- Studies Tab -->

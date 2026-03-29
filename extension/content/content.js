@@ -318,6 +318,8 @@
             type: 'MOUSE_DATA', x, y,
             pageX: e.clientX + window.scrollX,
             pageY: e.clientY + window.scrollY,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
             timestamp: Date.now(),
           }).catch(() => {});
         }
@@ -342,6 +344,8 @@
             type: 'TOUCH_DATA', x, y,
             pageX: touch.clientX + window.scrollX,
             pageY: touch.clientY + window.scrollY,
+            viewportWidth: window.innerWidth,
+            viewportHeight: window.innerHeight,
             timestamp: Date.now(),
           }).catch(() => {});
         }

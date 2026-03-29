@@ -9,11 +9,12 @@ const analytics = require('../services/analytics');
 
 // GET /analytics/heatmap/:sessionId — get heatmap data for a session
 router.get('/analytics/heatmap/:sessionId', authenticate, (req, res) => {
-  const gridSize = Math.max(10, Math.min(parseInt(req.query.gridSize) || 50, 200));
+  const gridCols = Math.max(5, Math.min(parseInt(req.query.gridCols) || 40, 100));
+  const gridRows = Math.max(5, Math.min(parseInt(req.query.gridRows) || 30, 100));
   const url = req.query.url || null;
 
   const limit = Math.min(parseInt(req.query.limit) || 200000, 500000);
-  let query = 'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\'';
+  let query = 'SELECT x, y, viewport_width, viewport_height FROM events WHERE session_id = ? AND type = \'gaze\'';
   const params = [req.params.sessionId];
   if (url) {
     query += ' AND url LIKE ?';
@@ -23,7 +24,7 @@ router.get('/analytics/heatmap/:sessionId', authenticate, (req, res) => {
   params.push(limit);
 
   const gaze = db.prepare(query).all(...params);
-  const heatmap = analytics.aggregateHeatmap(gaze, gridSize);
+  const heatmap = analytics.aggregateHeatmap(gaze, gridCols, gridRows);
   res.json({ heatmap, gazeCount: gaze.length });
 });
 
@@ -209,6 +210,75 @@ router.get('/analytics/overview', authenticate, (req, res) => {
     recentSessions,
     eventsByType,
   });
+});
+
+/* ========== URL-LEVEL HEATMAP AGGREGATION ========== */
+
+// POST /analytics/heatmap/url — aggregate heatmap for a URL across sessions
+router.post('/analytics/heatmap/url', authenticate, (req, res) => {
+  const { url, sessionIds, deviceCategory, gridCols, gridRows } = req.body;
+  if (!url || typeof url !== 'string' || url.length > 2000) {
+    return res.status(400).json({ error: 'Valid url required' });
+  }
+  if (sessionIds && (!Array.isArray(sessionIds) || sessionIds.length > 200)) {
+    return res.status(400).json({ error: 'sessionIds must be an array (max 200)' });
+  }
+  if (deviceCategory && !['all', 'mobile', 'tablet', 'desktop'].includes(deviceCategory)) {
+    return res.status(400).json({ error: 'deviceCategory must be all, mobile, tablet, or desktop' });
+  }
+
+  const result = analytics.aggregateUrlHeatmap(url, {
+    sessionIds,
+    deviceCategory,
+    gridCols: Math.max(5, Math.min(gridCols || 40, 100)),
+    gridRows: Math.max(5, Math.min(gridRows || 30, 100)),
+  });
+  res.json(result);
+});
+
+/* ========== COHORT HEATMAP DECOMPOSITION ========== */
+
+// POST /analytics/heatmap/cohort — decompose heatmap by cohort for a study
+router.post('/analytics/heatmap/cohort', authenticate, (req, res) => {
+  const { url, studyId, cohortField, deviceCategory, gridCols, gridRows } = req.body;
+  if (!url || typeof url !== 'string' || url.length > 2000) {
+    return res.status(400).json({ error: 'Valid url required' });
+  }
+  if (!studyId) return res.status(400).json({ error: 'studyId required' });
+
+  const study = db.prepare('SELECT id FROM studies WHERE id = ?').get(studyId);
+  if (!study) return res.status(404).json({ error: 'Study not found' });
+
+  if (cohortField && typeof cohortField !== 'string') {
+    return res.status(400).json({ error: 'cohortField must be a string' });
+  }
+  if (deviceCategory && !['all', 'mobile', 'tablet', 'desktop'].includes(deviceCategory)) {
+    return res.status(400).json({ error: 'deviceCategory must be all, mobile, tablet, or desktop' });
+  }
+
+  const result = analytics.decomposeByCohort(url, studyId, {
+    cohortField: cohortField || 'group',
+    deviceCategory,
+    gridCols: Math.max(5, Math.min(gridCols || 40, 100)),
+    gridRows: Math.max(5, Math.min(gridRows || 30, 100)),
+  });
+  res.json(result);
+});
+
+/* ========== VIEWPORT DISTRIBUTION ========== */
+
+// POST /analytics/viewports — get device/viewport breakdown for a URL or sessions
+router.post('/analytics/viewports', authenticate, (req, res) => {
+  const { url, sessionIds } = req.body;
+  if (!url && (!sessionIds || !Array.isArray(sessionIds) || sessionIds.length === 0)) {
+    return res.status(400).json({ error: 'url or sessionIds required' });
+  }
+  if (sessionIds && sessionIds.length > 200) {
+    return res.status(400).json({ error: 'Too many session IDs (max 200)' });
+  }
+
+  const result = analytics.viewportDistribution(url, sessionIds);
+  res.json(result);
 });
 
 module.exports = router;

@@ -210,37 +210,307 @@ function comparePages(url1Events, url2Events) {
 
 /* ========== HEATMAP AGGREGATION ========== */
 
-function aggregateHeatmap(gazeEvents, gridSize = 50) {
+/**
+ * Aggregate gaze events into a heatmap grid.
+ * Works in normalized 0-1 coordinate space so different device viewports
+ * are directly comparable. gridCols/gridRows define the resolution of
+ * the output grid (e.g. 40x30 = 1200 cells).
+ *
+ * Each cell contains: normalized x/y position, count, and intensity.
+ * The consumer maps cells to pixels at render time using their display resolution.
+ */
+function aggregateHeatmap(gazeEvents, gridCols = 40, gridRows = 30) {
   const grid = new Map();
   for (const e of gazeEvents) {
     if (e.x == null || e.y == null) continue;
-    // Convert normalized coords to grid cells
-    const gx = Math.floor((e.x * 1920) / gridSize);
-    const gy = Math.floor((e.y * 1080) / gridSize);
+    // Clamp to 0-1 range (data should already be normalized)
+    const nx = Math.max(0, Math.min(1, e.x));
+    const ny = Math.max(0, Math.min(1, e.y));
+    const gx = Math.min(Math.floor(nx * gridCols), gridCols - 1);
+    const gy = Math.min(Math.floor(ny * gridRows), gridRows - 1);
     const key = `${gx},${gy}`;
     grid.set(key, (grid.get(key) || 0) + 1);
   }
 
   const cells = [];
   let maxCount = 0;
+  const cellW = 1 / gridCols;
+  const cellH = 1 / gridRows;
   for (const [key, count] of grid) {
     const [gx, gy] = key.split(',').map(Number);
     cells.push({
-      x: gx * gridSize,
-      y: gy * gridSize,
-      width: gridSize,
-      height: gridSize,
+      // Normalized 0-1 positions — consumer maps to pixels at render time
+      x: gx * cellW,
+      y: gy * cellH,
+      width: cellW,
+      height: cellH,
+      col: gx,
+      row: gy,
       count,
     });
     if (count > maxCount) maxCount = count;
   }
 
-  // Normalize intensities
   for (const cell of cells) {
     cell.intensity = maxCount > 0 ? cell.count / maxCount : 0;
   }
 
-  return { cells, maxCount, gridSize };
+  return { cells, maxCount, gridCols, gridRows };
+}
+
+/* ========== DEVICE CATEGORIZATION ========== */
+
+const DEVICE_CATEGORIES = {
+  mobile:  { minW: 0,    maxW: 768  },
+  tablet:  { minW: 769,  maxW: 1024 },
+  desktop: { minW: 1025, maxW: 99999 },
+};
+
+function categorizeDevice(viewportWidth) {
+  if (viewportWidth == null || viewportWidth <= 0) return 'unknown';
+  for (const [name, range] of Object.entries(DEVICE_CATEGORIES)) {
+    if (viewportWidth >= range.minW && viewportWidth <= range.maxW) return name;
+  }
+  return 'desktop';
+}
+
+/**
+ * Group events by device category based on viewport_width.
+ * Returns { mobile: [...], tablet: [...], desktop: [...], unknown: [...] }.
+ */
+function groupByDevice(events) {
+  const groups = { mobile: [], tablet: [], desktop: [], unknown: [] };
+  for (const e of events) {
+    const cat = categorizeDevice(e.viewport_width);
+    groups[cat].push(e);
+  }
+  return groups;
+}
+
+/* ========== URL-LEVEL HEATMAP AGGREGATION ========== */
+
+/**
+ * Aggregate heatmap for a specific URL across multiple sessions.
+ * Supports optional device category filter.
+ * Returns the heatmap + device breakdown stats.
+ */
+function aggregateUrlHeatmap(url, opts = {}) {
+  const { sessionIds, deviceCategory, gridCols, gridRows, limit } = Object.assign(
+    { gridCols: 40, gridRows: 30, limit: 300000 }, opts
+  );
+
+  let query, params;
+  if (sessionIds && sessionIds.length > 0) {
+    const placeholders = sessionIds.map(() => '?').join(',');
+    query = `SELECT x, y, viewport_width, viewport_height FROM events
+             WHERE session_id IN (${placeholders}) AND type = 'gaze' AND url LIKE ?
+             ORDER BY timestamp LIMIT ?`;
+    params = [...sessionIds, `%${url}%`, limit];
+  } else {
+    query = `SELECT x, y, viewport_width, viewport_height FROM events
+             WHERE type = 'gaze' AND url LIKE ?
+             ORDER BY timestamp LIMIT ?`;
+    params = [`%${url}%`, limit];
+  }
+
+  let events = db.prepare(query).all(...params);
+
+  // Device breakdown before filtering
+  const deviceBreakdown = {};
+  for (const e of events) {
+    const cat = categorizeDevice(e.viewport_width);
+    deviceBreakdown[cat] = (deviceBreakdown[cat] || 0) + 1;
+  }
+
+  // Filter by device category if requested
+  if (deviceCategory && deviceCategory !== 'all') {
+    events = events.filter(e => categorizeDevice(e.viewport_width) === deviceCategory);
+  }
+
+  const heatmap = aggregateHeatmap(events, gridCols, gridRows);
+
+  return {
+    url,
+    heatmap,
+    totalPoints: events.length,
+    deviceBreakdown,
+    deviceFilter: deviceCategory || 'all',
+  };
+}
+
+/* ========== COHORT HEATMAP DECOMPOSITION ========== */
+
+/**
+ * Decompose heatmap by cohort for a given URL within a study.
+ * Cohort is determined by participant group_name or a metadata field.
+ *
+ * Returns per-cohort heatmaps with the same grid so they're directly comparable.
+ */
+function decomposeByCohort(url, studyId, opts = {}) {
+  const { cohortField, deviceCategory, gridCols, gridRows, limit } = Object.assign(
+    { cohortField: 'group', gridCols: 40, gridRows: 30, limit: 300000 }, opts
+  );
+
+  // Get participants and their cohort assignment
+  const participants = db.prepare(
+    'SELECT participant_id, group_name, metadata FROM participants WHERE study_id = ?'
+  ).all(studyId);
+
+  if (participants.length === 0) return { cohorts: {}, url, studyId };
+
+  // Determine cohort value for each participant
+  const participantCohort = new Map();
+  for (const p of participants) {
+    let cohortValue;
+    if (cohortField === 'group') {
+      cohortValue = p.group_name || 'default';
+    } else {
+      // Look up in participant metadata JSON
+      try {
+        const meta = JSON.parse(p.metadata || '{}');
+        cohortValue = String(meta[cohortField] || 'unknown');
+      } catch {
+        cohortValue = 'unknown';
+      }
+    }
+    participantCohort.set(p.participant_id, cohortValue);
+  }
+
+  // Get unique cohort values
+  const cohortValues = [...new Set(participantCohort.values())];
+
+  // Get sessions for this study
+  const sessions = db.prepare(
+    'SELECT id, participant_id FROM sessions WHERE study_id = ?'
+  ).all(studyId);
+
+  // Group session IDs by cohort
+  const sessionsByCohort = {};
+  for (const val of cohortValues) sessionsByCohort[val] = [];
+  for (const s of sessions) {
+    const cohort = participantCohort.get(s.participant_id);
+    if (cohort && sessionsByCohort[cohort]) {
+      sessionsByCohort[cohort].push(s.id);
+    }
+  }
+
+  // Build heatmap for each cohort
+  const cohorts = {};
+  const perCohortLimit = Math.floor(limit / Math.max(cohortValues.length, 1));
+
+  for (const [cohortValue, sids] of Object.entries(sessionsByCohort)) {
+    if (sids.length === 0) {
+      cohorts[cohortValue] = {
+        heatmap: { cells: [], maxCount: 0, gridCols, gridRows },
+        sessions: 0,
+        totalPoints: 0,
+        deviceBreakdown: {},
+      };
+      continue;
+    }
+
+    const placeholders = sids.map(() => '?').join(',');
+    let events = db.prepare(
+      `SELECT x, y, viewport_width, viewport_height FROM events
+       WHERE session_id IN (${placeholders}) AND type = 'gaze' AND url LIKE ?
+       ORDER BY timestamp LIMIT ?`
+    ).all(...sids, `%${url}%`, perCohortLimit);
+
+    // Device breakdown
+    const deviceBreakdown = {};
+    for (const e of events) {
+      const cat = categorizeDevice(e.viewport_width);
+      deviceBreakdown[cat] = (deviceBreakdown[cat] || 0) + 1;
+    }
+
+    if (deviceCategory && deviceCategory !== 'all') {
+      events = events.filter(e => categorizeDevice(e.viewport_width) === deviceCategory);
+    }
+
+    cohorts[cohortValue] = {
+      heatmap: aggregateHeatmap(events, gridCols, gridRows),
+      sessions: sids.length,
+      totalPoints: events.length,
+      deviceBreakdown,
+    };
+  }
+
+  // Also compute the combined heatmap across all cohorts for reference
+  const allSessionIds = sessions.map(s => s.id);
+  let allUrl;
+  if (allSessionIds.length > 0) {
+    const ph = allSessionIds.map(() => '?').join(',');
+    let allEvents = db.prepare(
+      `SELECT x, y, viewport_width FROM events
+       WHERE session_id IN (${ph}) AND type = 'gaze' AND url LIKE ?
+       ORDER BY timestamp LIMIT ?`
+    ).all(...allSessionIds, `%${url}%`, limit);
+
+    if (deviceCategory && deviceCategory !== 'all') {
+      allEvents = allEvents.filter(e => categorizeDevice(e.viewport_width) === deviceCategory);
+    }
+    allUrl = {
+      heatmap: aggregateHeatmap(allEvents, gridCols, gridRows),
+      totalPoints: allEvents.length,
+    };
+  } else {
+    allUrl = { heatmap: { cells: [], maxCount: 0, gridCols, gridRows }, totalPoints: 0 };
+  }
+
+  return {
+    url,
+    studyId,
+    cohortField,
+    deviceFilter: deviceCategory || 'all',
+    combined: allUrl,
+    cohorts,
+  };
+}
+
+/**
+ * Get device viewport distribution for a URL or set of sessions.
+ * Returns viewport size buckets and device category counts.
+ */
+function viewportDistribution(url, sessionIds) {
+  let query, params;
+  if (sessionIds && sessionIds.length > 0) {
+    const ph = sessionIds.map(() => '?').join(',');
+    query = `SELECT DISTINCT session_id,
+               CAST(viewport_width AS INT) as vw, CAST(viewport_height AS INT) as vh
+             FROM events
+             WHERE session_id IN (${ph}) AND type = 'gaze' AND viewport_width IS NOT NULL
+             GROUP BY session_id`;
+    params = [...sessionIds];
+  } else if (url) {
+    query = `SELECT DISTINCT session_id,
+               CAST(viewport_width AS INT) as vw, CAST(viewport_height AS INT) as vh
+             FROM events
+             WHERE type = 'gaze' AND url LIKE ? AND viewport_width IS NOT NULL
+             GROUP BY session_id`;
+    params = [`%${url}%`];
+  } else {
+    return { devices: {}, viewports: [] };
+  }
+
+  const rows = db.prepare(query).all(...params);
+
+  const devices = { mobile: 0, tablet: 0, desktop: 0, unknown: 0 };
+  const viewportSizes = new Map();
+  for (const r of rows) {
+    const cat = categorizeDevice(r.vw);
+    devices[cat]++;
+    const sizeKey = `${r.vw}x${r.vh}`;
+    viewportSizes.set(sizeKey, (viewportSizes.get(sizeKey) || 0) + 1);
+  }
+
+  return {
+    devices,
+    totalSessions: rows.length,
+    viewports: [...viewportSizes.entries()]
+      .map(([size, count]) => ({ size, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 20),
+  };
 }
 
 /* ========== SESSION SUMMARY ========== */
@@ -305,4 +575,9 @@ module.exports = {
   comparePages,
   aggregateHeatmap,
   sessionSummary,
+  categorizeDevice,
+  groupByDevice,
+  aggregateUrlHeatmap,
+  decomposeByCohort,
+  viewportDistribution,
 };

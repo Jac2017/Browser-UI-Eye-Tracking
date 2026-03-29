@@ -347,27 +347,31 @@ function renderEngagement(engagement, el) {
   `;
 }
 
+function drawHeatmapCells(ctx, heatmap, canvasW, canvasH) {
+  ctx.fillStyle = '#1a1a2e';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+  if (!heatmap?.cells) return;
+  for (const cell of heatmap.cells) {
+    const alpha = Math.max(0.05, cell.intensity);
+    const hue = (1 - cell.intensity) * 240; // blue to red
+    ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
+    // Cells are in normalized 0-1 space — map directly to canvas
+    ctx.fillRect(
+      cell.x * canvasW,
+      cell.y * canvasH,
+      cell.width * canvasW + 1,
+      cell.height * canvasH + 1
+    );
+  }
+}
+
 function renderHeatmap(heatmap, gazeCount, el) {
   el.innerHTML = `
     <div class="card" style="margin-bottom:16px"><div class="label">Gaze Points</div><div class="value">${fmtNum(gazeCount)}</div></div>
     <div class="heatmap-container"><canvas id="heatmap-canvas" width="960" height="540"></canvas></div>
   `;
   const canvas = document.getElementById('heatmap-canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#1a1a2e';
-  ctx.fillRect(0, 0, 960, 540);
-
-  if (!heatmap?.cells) return;
-  for (const cell of heatmap.cells) {
-    const alpha = Math.max(0.05, cell.intensity);
-    const hue = (1 - cell.intensity) * 240; // blue to red
-    ctx.fillStyle = `hsla(${hue}, 100%, 50%, ${alpha})`;
-    const x = (cell.x / 1920) * 960;
-    const y = (cell.y / 1080) * 540;
-    const w = (cell.width / 1920) * 960;
-    const h = (cell.height / 1080) * 540;
-    ctx.fillRect(x, y, w, h);
-  }
+  drawHeatmapCells(canvas.getContext('2d'), heatmap, 960, 540);
 }
 
 function renderTimeline(data, el) {
@@ -710,5 +714,195 @@ function fmtDuration(ms) {
   return `${h}h ${rm}m`;
 }
 
+/* ========== URL HEATMAP AGGREGATION ========== */
+
+async function runUrlHeatmap() {
+  const url = document.getElementById('url-heatmap-url').value.trim();
+  if (!url) { alert('Enter a URL'); return; }
+  const device = document.getElementById('url-heatmap-device').value;
+  const el = document.getElementById('url-heatmap-result');
+  el.innerHTML = '<div class="status-msg info">Loading...</div>';
+  try {
+    const res = await api('/analytics/heatmap/url', {
+      method: 'POST',
+      body: JSON.stringify({ url, deviceCategory: device }),
+    });
+    const data = await res.json();
+    let html = `
+      <div class="card-grid" style="margin-bottom:16px">
+        <div class="card"><div class="label">Total Gaze Points</div><div class="value">${fmtNum(data.totalPoints)}</div></div>
+        <div class="card"><div class="label">Device Filter</div><div class="value">${esc(data.deviceFilter)}</div></div>
+      </div>
+      <div class="card-grid" style="margin-bottom:16px">
+        ${Object.entries(data.deviceBreakdown || {}).map(([dev, cnt]) =>
+          `<div class="card"><div class="label">${esc(dev)}</div><div class="value">${fmtNum(cnt)}</div></div>`
+        ).join('')}
+      </div>
+      <div class="heatmap-container"><canvas id="url-heatmap-canvas" width="960" height="540"></canvas></div>
+    `;
+    el.innerHTML = html;
+    const canvas = document.getElementById('url-heatmap-canvas');
+    drawHeatmapCells(canvas.getContext('2d'), data.heatmap, 960, 540);
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== COHORT HEATMAP COMPARISON ========== */
+
+async function loadCohortStudies() {
+  try {
+    const res = await api('/studies');
+    const { studies } = await res.json();
+    const sel = document.getElementById('cohort-study');
+    sel.innerHTML = '<option value="">Select study...</option>' +
+      studies.map(s => `<option value="${Number(s.id)}">${esc(s.name)}</option>`).join('');
+  } catch { /* ignore */ }
+}
+
+async function runCohortHeatmap() {
+  const url = document.getElementById('cohort-url').value.trim();
+  const studyId = parseInt(document.getElementById('cohort-study').value);
+  const cohortField = document.getElementById('cohort-field').value;
+  const device = document.getElementById('cohort-device').value;
+
+  if (!url) { alert('Enter a URL'); return; }
+  if (!studyId) { alert('Select a study'); return; }
+
+  const el = document.getElementById('cohort-result');
+  el.innerHTML = '<div class="status-msg info">Analyzing cohorts...</div>';
+
+  try {
+    const res = await api('/analytics/heatmap/cohort', {
+      method: 'POST',
+      body: JSON.stringify({ url, studyId, cohortField, deviceCategory: device }),
+    });
+    const data = await res.json();
+    const cohortNames = Object.keys(data.cohorts);
+
+    if (cohortNames.length === 0) {
+      el.innerHTML = '<div class="status-msg error">No cohorts found for this study</div>';
+      return;
+    }
+
+    // Combined overview
+    let html = `
+      <div class="card" style="margin-bottom:16px;padding:16px">
+        <div class="label">Cohort Field: ${esc(data.cohortField)} | Device: ${esc(data.deviceFilter)} | URL: ${esc(data.url)}</div>
+        <div style="margin-top:8px;font-size:13px;color:var(--text-muted)">
+          Combined: ${fmtNum(data.combined.totalPoints)} gaze points |
+          Cohorts: ${cohortNames.map(n => esc(n)).join(', ')}
+        </div>
+      </div>
+
+      <h4 style="margin-bottom:12px">Combined Heatmap (all cohorts)</h4>
+      <div class="heatmap-container" style="margin-bottom:24px">
+        <canvas id="cohort-combined-canvas" width="960" height="540"></canvas>
+      </div>
+
+      <h4 style="margin-bottom:12px">Per-Cohort Heatmaps</h4>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(440px,1fr));gap:16px">
+    `;
+
+    for (const name of cohortNames) {
+      const cohort = data.cohorts[name];
+      const canvasId = 'cohort-canvas-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+      html += `
+        <div class="card" style="padding:16px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <strong>${esc(name)}</strong>
+            <span style="font-size:12px;color:var(--text-muted)">${fmtNum(cohort.totalPoints)} pts | ${fmtNum(cohort.sessions)} sessions</span>
+          </div>
+          <div style="margin-bottom:8px;font-size:11px;color:var(--text-muted)">
+            ${Object.entries(cohort.deviceBreakdown || {}).map(([d, c]) => esc(d) + ': ' + fmtNum(c)).join(' | ')}
+          </div>
+          <div class="heatmap-container"><canvas id="${esc(canvasId)}" width="480" height="270"></canvas></div>
+        </div>
+      `;
+    }
+    html += '</div>';
+
+    // Cohort comparison stats table
+    html += `
+      <h4 style="margin:24px 0 12px">Cohort Summary</h4>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><th style="text-align:left;padding:8px;border-bottom:1px solid var(--border)">Cohort</th>
+        <th style="padding:8px;border-bottom:1px solid var(--border)">Sessions</th>
+        <th style="padding:8px;border-bottom:1px solid var(--border)">Gaze Points</th>
+        <th style="padding:8px;border-bottom:1px solid var(--border)">Max Density</th>
+        <th style="padding:8px;border-bottom:1px solid var(--border)">Cells Active</th></tr>
+        ${cohortNames.map(name => {
+          const c = data.cohorts[name];
+          return `<tr>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-weight:600">${esc(name)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">${fmtNum(c.sessions)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">${fmtNum(c.totalPoints)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">${fmtNum(c.heatmap.maxCount)}</td>
+            <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center">${fmtNum(c.heatmap.cells.length)}</td>
+          </tr>`;
+        }).join('')}
+      </table>
+    `;
+
+    el.innerHTML = html;
+
+    // Render canvases
+    const combinedCanvas = document.getElementById('cohort-combined-canvas');
+    drawHeatmapCells(combinedCanvas.getContext('2d'), data.combined.heatmap, 960, 540);
+
+    for (const name of cohortNames) {
+      const canvasId = 'cohort-canvas-' + name.replace(/[^a-zA-Z0-9]/g, '_');
+      const canvas = document.getElementById(canvasId);
+      if (canvas) drawHeatmapCells(canvas.getContext('2d'), data.cohorts[name].heatmap, 480, 270);
+    }
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== VIEWPORT DISTRIBUTION ========== */
+
+async function runViewportDist() {
+  const url = document.getElementById('viewport-url').value.trim();
+  if (!url) { alert('Enter a URL'); return; }
+  const el = document.getElementById('viewport-result');
+  el.innerHTML = '<div class="status-msg info">Analyzing...</div>';
+  try {
+    const res = await api('/analytics/viewports', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+
+    const maxDevice = Math.max(...Object.values(data.devices), 1);
+    el.innerHTML = `
+      <div class="card-grid" style="margin-bottom:16px">
+        <div class="card"><div class="label">Total Sessions</div><div class="value">${fmtNum(data.totalSessions)}</div></div>
+        ${Object.entries(data.devices).map(([name, count]) =>
+          `<div class="card">
+            <div class="label">${esc(name)}</div>
+            <div class="value">${fmtNum(count)}</div>
+            <div style="height:6px;background:var(--bg);border-radius:3px;margin-top:6px;overflow:hidden">
+              <div style="height:100%;width:${(count/maxDevice*100).toFixed(0)}%;background:var(--accent);border-radius:3px"></div>
+            </div>
+          </div>`
+        ).join('')}
+      </div>
+      <h4 style="margin-bottom:8px">Top Viewport Sizes</h4>
+      <table style="width:100%;font-size:13px;border-collapse:collapse">
+        <tr><th style="text-align:left;padding:6px;border-bottom:1px solid var(--border)">Viewport</th>
+        <th style="padding:6px;border-bottom:1px solid var(--border)">Sessions</th></tr>
+        ${data.viewports.map(v =>
+          `<tr><td style="padding:4px 6px;border-bottom:1px solid var(--border);font-family:monospace">${esc(v.size)}</td>
+           <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center">${fmtNum(v.count)}</td></tr>`
+        ).join('')}
+      </table>
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
 // Initial load
 loadOverview();
+loadCohortStudies();
