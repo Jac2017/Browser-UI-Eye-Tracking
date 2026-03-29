@@ -246,11 +246,19 @@ function aggregateHeatmap(gazeEvents, gridSize = 50) {
 /* ========== SESSION SUMMARY ========== */
 
 function sessionSummary(sessionId) {
-  const events = db.prepare(
-    'SELECT type, timestamp, x, y, url, extra FROM events WHERE session_id = ? ORDER BY timestamp'
-  ).all(sessionId);
+  // Get event count first to avoid loading huge datasets entirely
+  const countRow = db.prepare(
+    'SELECT COUNT(*) as cnt FROM events WHERE session_id = ?'
+  ).get(sessionId);
+  if (!countRow || countRow.cnt === 0) return null;
 
-  if (events.length === 0) return null;
+  const MAX_EVENTS = 200000;
+  const totalEvents = countRow.cnt;
+  const limited = totalEvents > MAX_EVENTS;
+
+  const events = db.prepare(
+    'SELECT type, timestamp, x, y, url, extra FROM events WHERE session_id = ? ORDER BY timestamp LIMIT ?'
+  ).all(sessionId, MAX_EVENTS);
 
   const gaze = events.filter(e => e.type === 'gaze');
   const fixations = detectFixations(gaze);
@@ -275,7 +283,8 @@ function sessionSummary(sessionId) {
 
   return {
     sessionId,
-    totalEvents: events.length,
+    totalEvents,
+    limited,
     duration: events[events.length - 1].timestamp - events[0].timestamp,
     typeCounts,
     gazePoints: gaze.length,

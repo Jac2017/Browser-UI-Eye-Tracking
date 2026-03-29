@@ -12,13 +12,15 @@ router.get('/analytics/heatmap/:sessionId', authenticate, (req, res) => {
   const gridSize = Math.max(10, Math.min(parseInt(req.query.gridSize) || 50, 200));
   const url = req.query.url || null;
 
+  const limit = Math.min(parseInt(req.query.limit) || 200000, 500000);
   let query = 'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\'';
   const params = [req.params.sessionId];
   if (url) {
     query += ' AND url LIKE ?';
     params.push(`%${url}%`);
   }
-  query += ' ORDER BY timestamp';
+  query += ' ORDER BY timestamp LIMIT ?';
+  params.push(limit);
 
   const gaze = db.prepare(query).all(...params);
   const heatmap = analytics.aggregateHeatmap(gaze, gridSize);
@@ -28,7 +30,7 @@ router.get('/analytics/heatmap/:sessionId', authenticate, (req, res) => {
 // GET /analytics/fixations/:sessionId
 router.get('/analytics/fixations/:sessionId', authenticate, (req, res) => {
   const gaze = db.prepare(
-    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp'
+    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp LIMIT 200000'
   ).all(req.params.sessionId);
 
   const fixations = analytics.detectFixations(gaze);
@@ -44,7 +46,7 @@ router.get('/analytics/fixations/:sessionId', authenticate, (req, res) => {
 // GET /analytics/engagement/:sessionId
 router.get('/analytics/engagement/:sessionId', authenticate, (req, res) => {
   const events = db.prepare(
-    'SELECT type, timestamp, x, y FROM events WHERE session_id = ? ORDER BY timestamp'
+    'SELECT type, timestamp, x, y FROM events WHERE session_id = ? ORDER BY timestamp LIMIT 200000'
   ).all(req.params.sessionId);
 
   const gaze = events.filter(e => e.type === 'gaze');
@@ -76,7 +78,7 @@ router.post('/analytics/funnel', authenticate, (req, res) => {
     }
     const placeholders = sessionIds.map(() => '?').join(',');
     events = db.prepare(
-      `SELECT session_id, type, timestamp, url FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp`
+      `SELECT session_id, type, timestamp, url FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp LIMIT 500000`
     ).all(...sessionIds);
   } else {
     // Use all sessions for this API key
@@ -87,7 +89,7 @@ router.post('/analytics/funnel', authenticate, (req, res) => {
     if (sids.length === 0) return res.json({ funnel: [] });
     const placeholders = sids.map(() => '?').join(',');
     events = db.prepare(
-      `SELECT session_id, type, timestamp, url FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp`
+      `SELECT session_id, type, timestamp, url FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp LIMIT 500000`
     ).all(...sids);
   }
 
@@ -116,7 +118,7 @@ router.post('/analytics/compare', authenticate, (req, res) => {
   }
 
   const allEvents = db.prepare(
-    baseQuery + (whereClause || ' WHERE 1=1') + ' ORDER BY timestamp'
+    baseQuery + (whereClause || ' WHERE 1=1') + ' ORDER BY timestamp LIMIT 500000'
   ).all(...params1);
 
   const url1Events = allEvents.filter(e => e.url && e.url.includes(url1));
@@ -131,7 +133,7 @@ router.get('/analytics/timeline/:sessionId', authenticate, (req, res) => {
   const bucketMs = Math.max(100, Math.min(parseInt(req.query.bucket) || 1000, 60000));
 
   const gaze = db.prepare(
-    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp'
+    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp LIMIT 200000'
   ).all(req.params.sessionId);
 
   if (gaze.length === 0) return res.json({ timeline: [] });

@@ -8,7 +8,7 @@ const config = require('../config');
 // In-memory rate limit tracking
 const rateBuckets = new Map();
 
-// Clean stale buckets every 5 minutes
+// Clean stale buckets every 60 seconds
 setInterval(() => {
   const now = Date.now();
   for (const [key, bucket] of rateBuckets) {
@@ -16,7 +16,7 @@ setInterval(() => {
       rateBuckets.delete(key);
     }
   }
-}, 5 * 60 * 1000);
+}, 60 * 1000);
 
 const getKeyStmt = db.prepare('SELECT * FROM api_keys WHERE key = ? AND active = 1');
 const updateLastUsed = db.prepare('UPDATE api_keys SET last_used_at = datetime(\'now\') WHERE id = ?');

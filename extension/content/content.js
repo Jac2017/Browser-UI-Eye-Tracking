@@ -927,6 +927,12 @@
     if (state.recordingActive && state.eventBuffer.length > 0) {
       flushEventBuffer();
     }
+    // Clean up replay animation frame to prevent leak
+    if (replay.animFrame) {
+      cancelAnimationFrame(replay.animFrame);
+      replay.animFrame = null;
+    }
+    replay.playing = false;
   });
 
   function isChannelEnabled(channel) {
@@ -1335,17 +1341,24 @@
   }
 
   /* ========== AUTO-SCREENSHOT SYSTEM ========== */
+  let screenshotInProgress = false;
+
   function captureAutoScreenshot(trigger) {
     if (!state.recordingActive || !isChannelEnabled('autoScreenshots')) return;
+    if (screenshotInProgress) return;
 
     const now = Date.now();
     // Debounce: min 5s between auto-screenshots
     if (now - state.lastAutoScreenshotTime < 5000) return;
     state.lastAutoScreenshotTime = now;
+    screenshotInProgress = true;
 
     // Capture using the background screenshot mechanism
     chrome.runtime.sendMessage({ type: 'CAPTURE_SCREENSHOT' }, (response) => {
-      if (chrome.runtime.lastError || !response?.dataUrl) return;
+      if (chrome.runtime.lastError || !response?.dataUrl) {
+        screenshotInProgress = false;
+        return;
+      }
 
       // Resize for upload
       const maxWidth = state.settings?.screenshotMaxWidth || 1280;
@@ -1372,8 +1385,9 @@
           dataUrl: compressed,
           width: w,
           height: h,
-        }).catch(() => {});
+        }).catch(() => {}).finally(() => { screenshotInProgress = false; });
       };
+      img.onerror = () => { screenshotInProgress = false; };
       img.src = response.dataUrl;
     });
   }
