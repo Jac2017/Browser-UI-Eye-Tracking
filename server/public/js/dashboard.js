@@ -101,6 +101,7 @@ function initApp() {
         case 'analytics': loadSessionList(); loadOverlaySessionList(); loadReplaySessionList(); break;
         case 'tasks': loadTaskStudies(); break;
         case 'forms': loadFormSessionList(); break;
+        case 'feedback': loadFeedback(); break;
       }
     });
   });
@@ -1789,6 +1790,259 @@ async function loadFormAnalytics() {
     el.innerHTML = html;
   } catch (err) {
     el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== FEEDBACK MANAGEMENT ========== */
+let feedbackPage = 0;
+const FB_PAGE_SIZE = 30;
+
+async function loadFeedback() {
+  const status = document.getElementById('fb-filter-status').value;
+  const type = document.getElementById('fb-filter-type').value;
+  const priority = document.getElementById('fb-filter-priority').value;
+  const category = document.getElementById('fb-filter-category').value;
+  const search = document.getElementById('fb-search').value.trim();
+
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (type) params.set('type', type);
+  if (priority) params.set('priority', priority);
+  if (category) params.set('category', category);
+  if (search) params.set('search', search);
+  params.set('limit', FB_PAGE_SIZE);
+  params.set('offset', feedbackPage * FB_PAGE_SIZE);
+
+  try {
+    const res = await api(`/feedback?${params}`);
+    const data = await res.json();
+    renderFeedbackStats(data.stats);
+    renderFeedbackTable(data.feedback, data.total);
+    renderFeedbackPagination(data.total);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+function renderFeedbackStats(stats) {
+  const el = document.getElementById('feedback-stats-cards');
+  if (!stats) return;
+  el.innerHTML = `
+    <div class="card"><div class="label">Total</div><div class="value">${fmtNum(stats.total)}</div></div>
+    <div class="card"><div class="label">New</div><div class="value" style="color:var(--green)">${fmtNum(stats.new_count)}</div></div>
+    <div class="card"><div class="label">In Progress</div><div class="value" style="color:var(--yellow)">${fmtNum(stats.in_progress_count)}</div></div>
+    <div class="card"><div class="label">Critical</div><div class="value" style="color:var(--red)">${fmtNum(stats.critical_count)}</div></div>
+    <div class="card"><div class="label">Bugs</div><div class="value">${fmtNum(stats.bug_count)}</div></div>
+    <div class="card"><div class="label">Features</div><div class="value">${fmtNum(stats.feature_count)}</div></div>
+  `;
+}
+
+function renderFeedbackTable(items, total) {
+  const el = document.getElementById('feedback-table');
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="empty-state">No feedback matching filters.</div>';
+    return;
+  }
+  let html = `<table style="width:100%;font-size:13px;border-collapse:collapse">
+    <tr>
+      <th style="width:30px"><input type="checkbox" id="fb-select-all-head" onchange="toggleFbSelectAll()"></th>
+      <th style="text-align:left">Title</th>
+      <th>Type</th>
+      <th>Priority</th>
+      <th>Category</th>
+      <th>Status</th>
+      <th>Source</th>
+      <th>Date</th>
+      <th style="width:60px"></th>
+    </tr>`;
+  for (const fb of items) {
+    html += `
+    <tr class="fb-row" data-id="${fb.id}">
+      <td style="text-align:center"><input type="checkbox" class="fb-check" value="${fb.id}" onclick="event.stopPropagation()"></td>
+      <td style="cursor:pointer;font-weight:500" onclick="viewFeedbackDetail(${fb.id})">${esc(fb.title)}</td>
+      <td style="text-align:center"><span class="badge-type ${fb.type}">${fb.type}</span></td>
+      <td style="text-align:center"><span class="badge-priority ${fb.priority}">${fb.priority}</span></td>
+      <td style="text-align:center;font-size:11px">${fb.category}</td>
+      <td style="text-align:center"><span class="badge-status ${fb.status}">${fb.status.replace('_', ' ')}</span></td>
+      <td style="text-align:center;font-size:11px">${fb.source}</td>
+      <td style="white-space:nowrap;font-size:11px">${new Date(fb.created_at).toLocaleDateString()}</td>
+      <td style="text-align:center">
+        <button class="btn" style="font-size:11px;padding:2px 6px" onclick="event.stopPropagation();deleteFeedback(${fb.id})">✕</button>
+      </td>
+    </tr>`;
+  }
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+function renderFeedbackPagination(total) {
+  const el = document.getElementById('feedback-pagination');
+  const pages = Math.ceil(total / FB_PAGE_SIZE);
+  if (pages <= 1) { el.innerHTML = ''; return; }
+  let html = '';
+  for (let i = 0; i < pages && i < 10; i++) {
+    html += `<button class="btn${i === feedbackPage ? ' primary' : ''}" style="padding:4px 10px;font-size:12px" onclick="feedbackPage=${i};loadFeedback()">${i + 1}</button>`;
+  }
+  if (pages > 10) html += `<span style="color:var(--muted);font-size:12px">... ${pages} pages</span>`;
+  el.innerHTML = html;
+}
+
+function clearFeedbackFilters() {
+  document.getElementById('fb-filter-status').value = '';
+  document.getElementById('fb-filter-type').value = '';
+  document.getElementById('fb-filter-priority').value = '';
+  document.getElementById('fb-filter-category').value = '';
+  document.getElementById('fb-search').value = '';
+  feedbackPage = 0;
+  loadFeedback();
+}
+
+function toggleFbSelectAll() {
+  const checked = document.getElementById('fb-select-all-head')?.checked ||
+                  document.getElementById('fb-select-all')?.checked || false;
+  document.querySelectorAll('.fb-check').forEach(cb => cb.checked = checked);
+}
+
+function getSelectedFbIds() {
+  return Array.from(document.querySelectorAll('.fb-check:checked')).map(cb => parseInt(cb.value));
+}
+
+async function batchClassifyFeedback() {
+  const ids = getSelectedFbIds();
+  if (ids.length === 0) { toast('Select items first', 'error'); return; }
+
+  const status = document.getElementById('fb-batch-status').value;
+  const priority = document.getElementById('fb-batch-priority').value;
+  const category = document.getElementById('fb-batch-category').value;
+
+  if (!status && !priority && !category) { toast('Choose a status, priority, or category to apply', 'error'); return; }
+
+  try {
+    const body = { ids };
+    if (status) body.status = status;
+    if (priority) body.priority = priority;
+    if (category) body.category = category;
+    await api('/feedback/batch-classify', { method: 'POST', body: JSON.stringify(body) });
+    toast(`Updated ${ids.length} item(s)`, 'success');
+    // Reset batch selects
+    document.getElementById('fb-batch-status').value = '';
+    document.getElementById('fb-batch-priority').value = '';
+    document.getElementById('fb-batch-category').value = '';
+    loadFeedback();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function viewFeedbackDetail(id) {
+  try {
+    const res = await api(`/feedback/${id}`);
+    const fb = await res.json();
+
+    let html = `
+      <h2 style="margin-bottom:16px">${esc(fb.title)}</h2>
+      <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <span class="badge-type ${fb.type}">${fb.type}</span>
+        <span class="badge-priority ${fb.priority}">${fb.priority}</span>
+        <span class="badge-status ${fb.status}">${fb.status.replace('_', ' ')}</span>
+        <span style="font-size:12px;color:var(--muted)">Source: ${fb.source}</span>
+        <span style="font-size:12px;color:var(--muted)">${new Date(fb.created_at).toLocaleString()}</span>
+        ${fb.api_key_name ? `<span style="font-size:12px;color:var(--muted)">Key: ${esc(fb.api_key_name)}</span>` : ''}
+      </div>
+
+      ${fb.description ? `<div class="fb-detail-section"><h4>Description</h4><p>${esc(fb.description)}</p></div>` : ''}
+
+      <div class="fb-detail-grid">
+        ${fb.steps_to_reproduce ? `<div class="fb-detail-section"><h4>Steps to Reproduce</h4><p>${esc(fb.steps_to_reproduce)}</p></div>` : ''}
+        ${fb.expected_behavior ? `<div class="fb-detail-section"><h4>Expected</h4><p>${esc(fb.expected_behavior)}</p></div>` : ''}
+        ${fb.actual_behavior ? `<div class="fb-detail-section"><h4>Actual</h4><p>${esc(fb.actual_behavior)}</p></div>` : ''}
+        ${fb.url ? `<div class="fb-detail-section"><h4>URL</h4><p style="word-break:break-all">${esc(fb.url)}</p></div>` : ''}
+        ${fb.session_id ? `<div class="fb-detail-section"><h4>Session</h4><p>${esc(fb.session_id)}</p></div>` : ''}
+        ${fb.participant_id ? `<div class="fb-detail-section"><h4>Participant</h4><p>${esc(fb.participant_id)}</p></div>` : ''}
+      </div>
+
+      ${fb.browser_info && fb.browser_info !== '{}' ? `
+        <div class="fb-detail-section" style="margin-top:16px">
+          <h4>Browser Info</h4>
+          <p style="font-family:monospace;font-size:12px">${esc(fb.browser_info)}</p>
+        </div>` : ''}
+
+      ${fb.screenshot_data && fb.screenshot_data !== '[attached]' && fb.screenshot_data.length > 10 ? `
+        <div class="fb-detail-section" style="margin-top:16px">
+          <h4>Screenshot</h4>
+          <img src="${fb.screenshot_data}" style="max-width:100%;border-radius:4px;margin-top:8px" alt="Screenshot">
+        </div>` : ''}
+
+      <!-- Classification controls -->
+      <h3 style="margin-top:24px;margin-bottom:12px">Classify & Action</h3>
+      <div class="form-row-4" style="margin-bottom:12px">
+        <div class="form-group">
+          <label>Category</label>
+          <select id="fb-d-category">
+            ${['uncategorized','tracking','calibration','overlay','export','dashboard','auth','performance','data_loss','ui','api','other']
+              .map(c => `<option value="${c}"${fb.category === c ? ' selected' : ''}>${c}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Priority</label>
+          <select id="fb-d-priority">
+            ${['critical','high','medium','low'].map(p => `<option value="${p}"${fb.priority === p ? ' selected' : ''}>${p}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Status</label>
+          <select id="fb-d-status">
+            ${['new','triaged','in_progress','resolved','closed','wont_fix','duplicate'].map(s => `<option value="${s}"${fb.status === s ? ' selected' : ''}>${s.replace('_', ' ')}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Assigned To</label>
+          <input type="text" id="fb-d-assigned" value="${esc(fb.assigned_to || '')}" placeholder="e.g. researcher name">
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:12px">
+        <label>Resolution Notes</label>
+        <textarea id="fb-d-notes" rows="3" style="width:100%;resize:vertical">${esc(fb.resolution_notes || '')}</textarea>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn primary" onclick="saveFeedbackClassification(${fb.id})">Save Changes</button>
+        <button class="btn" onclick="closeModal()">Close</button>
+        <button class="btn danger-outline" style="margin-left:auto" onclick="deleteFeedback(${fb.id});closeModal()">Delete</button>
+      </div>
+    `;
+
+    showModal(html);
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function saveFeedbackClassification(id) {
+  try {
+    const body = {
+      category: document.getElementById('fb-d-category').value,
+      priority: document.getElementById('fb-d-priority').value,
+      status: document.getElementById('fb-d-status').value,
+      assignedTo: document.getElementById('fb-d-assigned').value.trim(),
+      resolutionNotes: document.getElementById('fb-d-notes').value.trim(),
+    };
+    await api(`/feedback/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    toast('Feedback updated', 'success');
+    closeModal();
+    loadFeedback();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
+}
+
+async function deleteFeedback(id) {
+  if (!confirm('Delete this feedback report?')) return;
+  try {
+    await api(`/feedback/${id}`, { method: 'DELETE' });
+    toast('Deleted', 'success');
+    loadFeedback();
+  } catch (err) {
+    toast(err.message, 'error');
   }
 }
 

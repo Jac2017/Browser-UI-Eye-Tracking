@@ -294,6 +294,100 @@ async function loadSessionInfo() {
   } catch (e) {}
 }
 
+/* ========== FEEDBACK ========== */
+$('#btn-send-feedback').addEventListener('click', async () => {
+  const title = $('#fb-title').value.trim();
+  const description = $('#fb-description').value.trim();
+  const type = $('#fb-type').value;
+  const statusEl = $('#fb-status');
+
+  if (!title) {
+    statusEl.textContent = 'Please enter a title.';
+    statusEl.className = 'fb-status error';
+    return;
+  }
+
+  statusEl.textContent = 'Sending...';
+  statusEl.className = 'fb-status';
+
+  try {
+    // Get settings for server URL and API key
+    const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+    const serverUrl = settings?.serverUrl || settings?.endpoint;
+    const apiKey = settings?.apiKey;
+
+    if (!serverUrl) {
+      statusEl.textContent = 'No server configured. Set server URL in settings.';
+      statusEl.className = 'fb-status error';
+      return;
+    }
+
+    // Gather browser info
+    const browserInfo = {
+      userAgent: navigator.userAgent,
+      platform: navigator.platform,
+      language: navigator.language,
+    };
+
+    // Get current session info
+    let sessionId = '';
+    let participantId = '';
+    try {
+      const info = await chrome.runtime.sendMessage({ type: 'GET_SESSION_INFO' });
+      sessionId = info?.sessionId || '';
+      participantId = info?.participantId || '';
+    } catch (e) {}
+
+    // Get current tab URL
+    let currentUrl = '';
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      currentUrl = tab?.url || '';
+    } catch (e) {}
+
+    const body = {
+      type,
+      title,
+      description,
+      stepsToReproduce: $('#fb-steps')?.value.trim() || '',
+      expectedBehavior: $('#fb-expected')?.value.trim() || '',
+      actualBehavior: $('#fb-actual')?.value.trim() || '',
+      url: currentUrl,
+      browserInfo,
+      sessionId,
+      participantId,
+      source: 'extension',
+    };
+
+    const url = serverUrl.replace(/\/+$/, '') + '/api/feedback';
+    const headers = { 'Content-Type': 'application/json' };
+    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+    const res = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (res.ok) {
+      statusEl.textContent = 'Feedback sent — thank you!';
+      statusEl.className = 'fb-status success';
+      $('#fb-title').value = '';
+      $('#fb-description').value = '';
+      if ($('#fb-steps')) $('#fb-steps').value = '';
+      if ($('#fb-expected')) $('#fb-expected').value = '';
+      if ($('#fb-actual')) $('#fb-actual').value = '';
+    } else {
+      const err = await res.json().catch(() => ({}));
+      statusEl.textContent = err.error || `Error (${res.status})`;
+      statusEl.className = 'fb-status error';
+    }
+  } catch (e) {
+    statusEl.textContent = 'Failed to send — check server connection.';
+    statusEl.className = 'fb-status error';
+  }
+});
+
 /* ========== SETTINGS ========== */
 $('#btn-settings').addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'OPEN_SETTINGS' });

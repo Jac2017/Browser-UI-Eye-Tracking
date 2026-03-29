@@ -184,6 +184,36 @@ function initialize() {
       created_at TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_session_annotations_session ON session_annotations(session_id);
+
+    -- Feedback & Bug Reports
+    CREATE TABLE IF NOT EXISTS feedback (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source TEXT NOT NULL DEFAULT 'extension',
+      type TEXT NOT NULL DEFAULT 'bug',
+      category TEXT DEFAULT 'uncategorized',
+      priority TEXT DEFAULT 'medium',
+      status TEXT DEFAULT 'new',
+      title TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      steps_to_reproduce TEXT DEFAULT '',
+      expected_behavior TEXT DEFAULT '',
+      actual_behavior TEXT DEFAULT '',
+      url TEXT DEFAULT '',
+      browser_info TEXT DEFAULT '{}',
+      session_id TEXT DEFAULT '',
+      participant_id TEXT DEFAULT '',
+      screenshot_data TEXT DEFAULT '',
+      assigned_to TEXT DEFAULT '',
+      resolution_notes TEXT DEFAULT '',
+      api_key_id INTEGER REFERENCES api_keys(id),
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);
+    CREATE INDEX IF NOT EXISTS idx_feedback_type ON feedback(type);
+    CREATE INDEX IF NOT EXISTS idx_feedback_category ON feedback(category);
+    CREATE INDEX IF NOT EXISTS idx_feedback_priority ON feedback(priority);
+    CREATE INDEX IF NOT EXISTS idx_feedback_created ON feedback(created_at);
   `);
 
   console.log('Database initialized');

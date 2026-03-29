@@ -107,6 +107,32 @@
       </div>
     </details>
 
+    <!-- Collapsible: Feedback -->
+    <details class="section collapsible">
+      <summary class="collapse-header">Send Feedback</summary>
+      <div class="collapse-body">
+        <div class="fb-form">
+          <select id="fb-type" class="session-input" style="margin-bottom:6px">
+            <option value="bug">Bug Report</option>
+            <option value="feature">Feature Request</option>
+            <option value="usability">Usability Issue</option>
+            <option value="performance">Performance Issue</option>
+            <option value="other">Other</option>
+          </select>
+          <input type="text" id="fb-title" class="session-input" placeholder="Brief title..." style="margin-bottom:6px">
+          <textarea id="fb-description" class="session-input" placeholder="Describe the issue or suggestion..." rows="3" style="resize:vertical;margin-bottom:6px"></textarea>
+          <details class="sub-details">
+            <summary style="font-size:0.7rem;color:#8b949e;cursor:pointer;margin-bottom:4px">Extra details (optional)</summary>
+            <textarea id="fb-steps" class="session-input" placeholder="Steps to reproduce..." rows="2" style="resize:vertical;margin-bottom:4px"></textarea>
+            <input type="text" id="fb-expected" class="session-input" placeholder="Expected behavior..." style="margin-bottom:4px">
+            <input type="text" id="fb-actual" class="session-input" placeholder="Actual behavior...">
+          </details>
+          <button id="btn-send-feedback" class="btn primary full-width" style="margin-top:6px">Submit Feedback</button>
+          <div id="fb-status" class="fb-status"></div>
+        </div>
+      </div>
+    </details>
+
     <!-- Footer Actions -->
     <div class="section footer-actions">
       <button id="btn-open-insights" class="btn full-width">Open Dashboard</button>

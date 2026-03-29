@@ -244,5 +244,15 @@ details[open] > .collapse-header::before {
 .saved-session-item .session-name { color: #58a6ff; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .saved-session-item .session-meta { color: #484f58; margin-left: 4px; white-space: nowrap; }
 
+/* Feedback form */
+.fb-form textarea.session-input { font-family: inherit; font-size: 0.8rem; min-height: 40px; }
+.sub-details { margin-top: 2px; }
+.sub-details summary { list-style: none; }
+.sub-details summary::before { content: '+ '; }
+.sub-details[open] summary::before { content: '− '; }
+.fb-status { font-size: 0.72rem; margin-top: 4px; text-align: center; min-height: 16px; }
+.fb-status.success { color: #3fb950; }
+.fb-status.error { color: #f85149; }
+
 /* Footer */
 .footer-actions { border-top: 1px solid #30363d; padding-top: 8px; margin-top: 4px; }

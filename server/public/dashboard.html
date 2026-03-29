@@ -39,6 +39,7 @@
         <div class="tab" data-tab="webhooks">Webhooks</div>
         <div class="tab" data-tab="tasks">Tasks</div>
         <div class="tab" data-tab="forms">Forms</div>
+        <div class="tab" data-tab="feedback">Feedback</div>
         <div class="tab" data-tab="live">Live</div>
       </div>
 
@@ -322,6 +323,122 @@
         <div id="form-analytics-result">
           <div class="empty-state">Select a session to analyze form interactions.</div>
         </div>
+      </div>
+
+      <!-- Feedback Tab -->
+      <div class="tab-content" id="tab-feedback">
+        <!-- Stats cards -->
+        <div class="card-grid" id="feedback-stats-cards"></div>
+
+        <!-- Filters & Actions Bar -->
+        <div class="filter-panel" style="margin-top:16px">
+          <div class="form-row-4">
+            <div class="form-group">
+              <label>Status</label>
+              <select id="fb-filter-status" onchange="loadFeedback()">
+                <option value="">All</option>
+                <option value="new" selected>New</option>
+                <option value="triaged">Triaged</option>
+                <option value="in_progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+                <option value="wont_fix">Won't Fix</option>
+                <option value="duplicate">Duplicate</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Type</label>
+              <select id="fb-filter-type" onchange="loadFeedback()">
+                <option value="">All</option>
+                <option value="bug">Bug</option>
+                <option value="feature">Feature</option>
+                <option value="usability">Usability</option>
+                <option value="performance">Performance</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Priority</label>
+              <select id="fb-filter-priority" onchange="loadFeedback()">
+                <option value="">All</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Category</label>
+              <select id="fb-filter-category" onchange="loadFeedback()">
+                <option value="">All</option>
+                <option value="uncategorized">Uncategorized</option>
+                <option value="tracking">Tracking</option>
+                <option value="calibration">Calibration</option>
+                <option value="overlay">Overlay</option>
+                <option value="export">Export</option>
+                <option value="dashboard">Dashboard</option>
+                <option value="auth">Auth</option>
+                <option value="performance">Performance</option>
+                <option value="data_loss">Data Loss</option>
+                <option value="ui">UI</option>
+                <option value="api">API</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row" style="margin-top:8px">
+            <div class="form-group" style="flex:2">
+              <label>Search</label>
+              <input type="text" id="fb-search" placeholder="Search title or description..." onkeydown="if(event.key==='Enter')loadFeedback()">
+            </div>
+            <div class="form-group form-group-end">
+              <button class="btn primary" onclick="loadFeedback()">Filter</button>
+              <button class="btn" onclick="clearFeedbackFilters()">Clear</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Batch Actions -->
+        <div style="margin:12px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap" id="fb-batch-bar">
+          <label style="font-size:13px;color:var(--muted)"><input type="checkbox" id="fb-select-all" onchange="toggleFbSelectAll()"> Select all</label>
+          <select id="fb-batch-status" style="font-size:12px">
+            <option value="">Set Status...</option>
+            <option value="triaged">Triaged</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+            <option value="closed">Closed</option>
+            <option value="wont_fix">Won't Fix</option>
+            <option value="duplicate">Duplicate</option>
+          </select>
+          <select id="fb-batch-priority" style="font-size:12px">
+            <option value="">Set Priority...</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
+          <select id="fb-batch-category" style="font-size:12px">
+            <option value="">Set Category...</option>
+            <option value="tracking">Tracking</option>
+            <option value="calibration">Calibration</option>
+            <option value="overlay">Overlay</option>
+            <option value="export">Export</option>
+            <option value="dashboard">Dashboard</option>
+            <option value="auth">Auth</option>
+            <option value="performance">Performance</option>
+            <option value="data_loss">Data Loss</option>
+            <option value="ui">UI</option>
+            <option value="api">API</option>
+            <option value="other">Other</option>
+          </select>
+          <button class="btn" onclick="batchClassifyFeedback()">Apply to Selected</button>
+        </div>
+
+        <!-- Table -->
+        <div class="table-wrap" id="feedback-table">
+          <div class="empty-state">No feedback reports yet.</div>
+        </div>
+        <div id="feedback-pagination" style="margin-top:12px;display:flex;gap:8px;justify-content:center"></div>
       </div>
 
       <!-- Live Feed Tab -->

@@ -192,6 +192,32 @@ td .pill { font-size: 10px; }
 .dwell-bar { height: 8px; border-radius: 4px; background: var(--accent); min-width: 2px; }
 
 /* ===== RESPONSIVE ===== */
+/* Feedback badges */
+.badge-priority { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; text-transform: uppercase; }
+.badge-priority.critical { background: #da3633; color: #fff; }
+.badge-priority.high { background: #d29922; color: #fff; }
+.badge-priority.medium { background: #388bfd; color: #fff; }
+.badge-priority.low { background: #30363d; color: #8b949e; }
+.badge-status { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-status.new { background: #238636; color: #fff; }
+.badge-status.triaged { background: #1f6feb; color: #fff; }
+.badge-status.in_progress { background: #d29922; color: #fff; }
+.badge-status.resolved { background: #388bfd; color: #fff; }
+.badge-status.closed { background: #30363d; color: #8b949e; }
+.badge-status.wont_fix { background: #30363d; color: #8b949e; }
+.badge-status.duplicate { background: #30363d; color: #8b949e; }
+.badge-type { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; }
+.badge-type.bug { background: #da363322; color: #f85149; border: 1px solid #da363344; }
+.badge-type.feature { background: #23863622; color: #3fb950; border: 1px solid #23863644; }
+.badge-type.usability { background: #1f6feb22; color: #58a6ff; border: 1px solid #1f6feb44; }
+.badge-type.performance { background: #d2992222; color: #e3b341; border: 1px solid #d2992244; }
+.fb-row { cursor: pointer; transition: background 0.15s; }
+.fb-row:hover { background: #161b22; }
+.fb-detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
+.fb-detail-section { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; }
+.fb-detail-section h4 { font-size: 12px; color: #8b949e; text-transform: uppercase; margin-bottom: 8px; }
+.fb-detail-section p { font-size: 13px; white-space: pre-wrap; }
+
 @media (max-width: 1024px) {
   .form-row-4 { grid-template-columns: 1fr 1fr; }
 }
