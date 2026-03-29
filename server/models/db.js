@@ -133,6 +133,57 @@ function initialize() {
     CREATE INDEX IF NOT EXISTS idx_sessions_api_key ON sessions(api_key_id);
     CREATE INDEX IF NOT EXISTS idx_sessions_study ON sessions(study_id);
     CREATE INDEX IF NOT EXISTS idx_participants_study ON participants(study_id);
+
+    -- Tasks (research task/scenario definitions within a study)
+    CREATE TABLE IF NOT EXISTS tasks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      study_id INTEGER NOT NULL REFERENCES studies(id),
+      name TEXT NOT NULL,
+      description TEXT DEFAULT '',
+      instructions TEXT DEFAULT '',
+      target_url TEXT DEFAULT '',
+      success_criteria TEXT DEFAULT '',
+      sort_order INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tasks_study ON tasks(study_id);
+
+    -- Task Instances (per-participant task attempts)
+    CREATE TABLE IF NOT EXISTS task_instances (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      task_id INTEGER NOT NULL REFERENCES tasks(id),
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      participant_id TEXT DEFAULT '',
+      status TEXT DEFAULT 'pending',
+      start_time INTEGER,
+      end_time INTEGER,
+      duration INTEGER,
+      success INTEGER,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_task_instances_task ON task_instances(task_id);
+    CREATE INDEX IF NOT EXISTS idx_task_instances_session ON task_instances(session_id);
+
+    -- Session Tags & Annotations
+    CREATE TABLE IF NOT EXISTS session_tags (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      tag TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_tags_session ON session_tags(session_id);
+    CREATE INDEX IF NOT EXISTS idx_session_tags_tag ON session_tags(tag);
+
+    CREATE TABLE IF NOT EXISTS session_annotations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id),
+      timestamp INTEGER,
+      text TEXT NOT NULL,
+      author TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_annotations_session ON session_annotations(session_id);
   `);
 
   console.log('Database initialized');

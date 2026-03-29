@@ -281,4 +281,36 @@ router.post('/analytics/viewports', authenticate, (req, res) => {
   res.json(result);
 });
 
+/* ========== TIME TO FIRST FIXATION ========== */
+
+// POST /analytics/ttff — time-to-first-fixation for AOIs
+router.post('/analytics/ttff', authenticate, (req, res) => {
+  const { sessionId, sessionIds, aois } = req.body;
+  if (!Array.isArray(aois) || aois.length === 0) {
+    return res.status(400).json({ error: 'aois array required' });
+  }
+  if (aois.length > 50) return res.status(400).json({ error: 'Too many AOIs (max 50)' });
+
+  for (const aoi of aois) {
+    if (!aoi.name || aoi.x == null || aoi.y == null || aoi.width == null || aoi.height == null) {
+      return res.status(400).json({ error: 'Each AOI needs name, x, y, width, height (normalized 0-1)' });
+    }
+  }
+
+  // Single session TTFF
+  if (sessionId) {
+    const result = analytics.timeToFirstFixation(sessionId, aois);
+    return res.json({ results: result, sessionId });
+  }
+
+  // Aggregate TTFF across sessions
+  if (sessionIds && Array.isArray(sessionIds) && sessionIds.length > 0) {
+    if (sessionIds.length > 100) return res.status(400).json({ error: 'Too many session IDs (max 100)' });
+    const result = analytics.aggregateTTFF(sessionIds, aois);
+    return res.json({ results: result, sessions: sessionIds.length });
+  }
+
+  return res.status(400).json({ error: 'sessionId or sessionIds required' });
+});
+
 module.exports = router;

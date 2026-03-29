@@ -1236,14 +1236,28 @@
   function initFormTracking() {
     if (!isChannelEnabled('formFocus')) return;
 
+    // Track active field for time-in-field calculation
+    const formState = {
+      activeField: null,
+      focusTime: 0,
+      initialValue: '',
+      interactionCount: 0,
+    };
+
     document.addEventListener('focusin', (e) => {
       if (!state.recordingActive) return;
       const el = e.target;
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        formState.activeField = el;
+        formState.focusTime = Date.now();
+        formState.initialValue = el.value || '';
+        formState.interactionCount = 0;
+
         bufferEvent({
           type: 'formFocus',
-          timestamp: Date.now(),
+          timestamp: formState.focusTime,
           fieldType: el.type || el.tagName.toLowerCase(),
+          required: el.required || false,
           element: getElementMeta(el),
         });
       }
@@ -1253,14 +1267,74 @@
       if (!state.recordingActive) return;
       const el = e.target;
       if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+        const now = Date.now();
+        const dwellTime = formState.focusTime > 0 ? now - formState.focusTime : 0;
+        const valueChanged = el.value !== formState.initialValue;
+        const isEmpty = !el.value || el.value.trim() === '';
+        const isSensitive = SENSITIVE_INPUT_TYPES.has(el.type);
+
         bufferEvent({
           type: 'formBlur',
-          timestamp: Date.now(),
+          timestamp: now,
           fieldType: el.type || el.tagName.toLowerCase(),
+          dwellTime,
+          valueChanged,
+          abandoned: !valueChanged && isEmpty && el.required,
+          interactionCount: formState.interactionCount,
+          valueLength: isSensitive ? 0 : (el.value || '').length,
+          required: el.required || false,
           element: getElementMeta(el),
         });
+
+        formState.activeField = null;
+        formState.focusTime = 0;
       }
     }, { passive: true });
+
+    // Track keystrokes in form fields (count only, not content)
+    document.addEventListener('input', (e) => {
+      if (!state.recordingActive) return;
+      if (formState.activeField === e.target) {
+        formState.interactionCount++;
+      }
+    }, { passive: true });
+
+    // Track form submissions
+    document.addEventListener('submit', (e) => {
+      if (!state.recordingActive) return;
+      const form = e.target;
+      if (form.tagName !== 'FORM') return;
+
+      const inputs = form.querySelectorAll('input, textarea, select');
+      let filledCount = 0;
+      let emptyRequired = 0;
+      for (const inp of inputs) {
+        if (inp.value && inp.value.trim()) filledCount++;
+        else if (inp.required) emptyRequired++;
+      }
+
+      bufferEvent({
+        type: 'formSubmit',
+        timestamp: Date.now(),
+        totalFields: inputs.length,
+        filledFields: filledCount,
+        emptyRequired,
+        element: getElementMeta(form),
+      });
+    }, { passive: true });
+
+    // Track form validation errors (invalid event fires on constraint violation)
+    document.addEventListener('invalid', (e) => {
+      if (!state.recordingActive) return;
+      const el = e.target;
+      bufferEvent({
+        type: 'formError',
+        timestamp: Date.now(),
+        fieldType: el.type || el.tagName.toLowerCase(),
+        validationMessage: (el.validationMessage || '').substring(0, 100),
+        element: getElementMeta(el),
+      });
+    }, true); // Must use capture phase for invalid event
   }
 
   /* ========== NEW DATA CHANNEL: TEXT SELECTION ========== */
@@ -1342,6 +1416,155 @@
         url: sanitizedUrl,
       });
     });
+
+    // SPA navigation detection — intercept pushState/replaceState
+    const originalPushState = history.pushState;
+    const originalReplaceState = history.replaceState;
+
+    history.pushState = function (...args) {
+      originalPushState.apply(this, args);
+      if (state.recordingActive) {
+        let sanitizedUrl = '';
+        try {
+          const u = new URL(window.location.href);
+          u.search = '';
+          u.hash = '';
+          sanitizedUrl = u.toString();
+        } catch { /* skip */ }
+        bufferEvent({
+          type: 'navigation',
+          timestamp: Date.now(),
+          action: 'pushState',
+          url: sanitizedUrl,
+        });
+      }
+    };
+
+    history.replaceState = function (...args) {
+      originalReplaceState.apply(this, args);
+      if (state.recordingActive) {
+        let sanitizedUrl = '';
+        try {
+          const u = new URL(window.location.href);
+          u.search = '';
+          u.hash = '';
+          sanitizedUrl = u.toString();
+        } catch { /* skip */ }
+        bufferEvent({
+          type: 'navigation',
+          timestamp: Date.now(),
+          action: 'replaceState',
+          url: sanitizedUrl,
+        });
+      }
+    };
+  }
+
+  /* ========== WEB VITALS ========== */
+  function initWebVitals() {
+    // Use PerformanceObserver API to capture Core Web Vitals
+    try {
+      // First Contentful Paint (FCP)
+      const fcpObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.name === 'first-contentful-paint') {
+            bufferEvent({
+              type: 'webVital',
+              timestamp: Date.now(),
+              metric: 'FCP',
+              value: Math.round(entry.startTime),
+              rating: entry.startTime <= 1800 ? 'good' : entry.startTime <= 3000 ? 'needs-improvement' : 'poor',
+            });
+            fcpObserver.disconnect();
+          }
+        }
+      });
+      fcpObserver.observe({ type: 'paint', buffered: true });
+
+      // Largest Contentful Paint (LCP)
+      const lcpObserver = new PerformanceObserver((list) => {
+        const entries = list.getEntries();
+        const last = entries[entries.length - 1];
+        if (last) {
+          bufferEvent({
+            type: 'webVital',
+            timestamp: Date.now(),
+            metric: 'LCP',
+            value: Math.round(last.startTime),
+            rating: last.startTime <= 2500 ? 'good' : last.startTime <= 4000 ? 'needs-improvement' : 'poor',
+            element: last.element ? getElementMeta(last.element) : null,
+          });
+        }
+      });
+      lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+      // Stop observing LCP on first input or visibilitychange
+      const stopLcp = () => { lcpObserver.disconnect(); };
+      document.addEventListener('keydown', stopLcp, { once: true, passive: true });
+      document.addEventListener('click', stopLcp, { once: true, passive: true });
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) stopLcp();
+      }, { once: true });
+
+      // Cumulative Layout Shift (CLS)
+      let clsValue = 0;
+      const clsObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (!entry.hadRecentInput) {
+            clsValue += entry.value;
+          }
+        }
+      });
+      clsObserver.observe({ type: 'layout-shift', buffered: true });
+      // Report CLS on page unload
+      window.addEventListener('beforeunload', () => {
+        if (clsValue > 0) {
+          bufferEvent({
+            type: 'webVital',
+            timestamp: Date.now(),
+            metric: 'CLS',
+            value: Math.round(clsValue * 1000) / 1000,
+            rating: clsValue <= 0.1 ? 'good' : clsValue <= 0.25 ? 'needs-improvement' : 'poor',
+          });
+          flushEventBuffer();
+        }
+        clsObserver.disconnect();
+      });
+
+      // First Input Delay (FID) / Interaction to Next Paint (INP)
+      const fidObserver = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          if (entry.processingStart) {
+            const delay = entry.processingStart - entry.startTime;
+            bufferEvent({
+              type: 'webVital',
+              timestamp: Date.now(),
+              metric: 'FID',
+              value: Math.round(delay),
+              rating: delay <= 100 ? 'good' : delay <= 300 ? 'needs-improvement' : 'poor',
+            });
+            fidObserver.disconnect();
+            break;
+          }
+        }
+      });
+      fidObserver.observe({ type: 'first-input', buffered: true });
+
+      // Navigation timing (page load)
+      setTimeout(() => {
+        const nav = performance.getEntriesByType('navigation')[0];
+        if (nav) {
+          bufferEvent({
+            type: 'pagePerformance',
+            timestamp: Date.now(),
+            domReady: Math.round(nav.domContentLoadedEventEnd),
+            loadComplete: Math.round(nav.loadEventEnd),
+            ttfb: Math.round(nav.responseStart),
+            domInteractive: Math.round(nav.domInteractive),
+            transferSize: nav.transferSize || 0,
+          });
+        }
+      }, 3000);
+    } catch { /* PerformanceObserver not available */ }
   }
 
   /* ========== AUTO-SCREENSHOT SYSTEM ========== */
@@ -1581,6 +1804,7 @@
     initFormTracking();
     initTextSelectionTracking();
     initNavigationTracking();
+    initWebVitals();
 
     // Defer element visibility observer slightly so DOM is more populated
     setTimeout(initElementVisibilityTracking, 2000);

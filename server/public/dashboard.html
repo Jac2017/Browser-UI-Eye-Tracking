@@ -23,6 +23,7 @@
       <div class="tab" data-tab="studies">Studies</div>
       <div class="tab" data-tab="keys">API Keys</div>
       <div class="tab" data-tab="webhooks">Webhooks</div>
+      <div class="tab" data-tab="tasks">Tasks</div>
       <div class="tab" data-tab="live">Live Feed</div>
     </div>
 
@@ -37,8 +38,29 @@
 
     <!-- Sessions Tab -->
     <div class="tab-content" id="tab-sessions">
+      <div class="card" style="padding:16px;margin-bottom:16px">
+        <h4 style="margin-bottom:12px">Filters</h4>
+        <div class="form-row">
+          <div class="form-group"><label>Status</label>
+            <select id="filter-status" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px;border-radius:6px;width:100%">
+              <option value="">All</option><option value="active">Active</option><option value="ended">Ended</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Participant ID</label><input id="filter-participant" placeholder="Any"></div>
+          <div class="form-group"><label>Tag</label><input id="filter-tag" placeholder="Any"></div>
+          <div class="form-group"><label>Search Name</label><input id="filter-search" placeholder="Search..."></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Study ID</label><input id="filter-study" type="number" placeholder="Any"></div>
+          <div class="form-group"><label>Min Duration (ms)</label><input id="filter-min-dur" type="number" placeholder="Any"></div>
+          <div class="form-group"><label>Max Duration (ms)</label><input id="filter-max-dur" type="number" placeholder="Any"></div>
+          <div class="form-group" style="display:flex;align-items:flex-end">
+            <button class="btn primary" onclick="loadFilteredSessions()">Apply Filters</button>
+          </div>
+        </div>
+      </div>
       <div class="btn-row">
-        <button class="btn" onclick="loadSessions()">Refresh</button>
+        <button class="btn" onclick="loadSessions()">Reset &amp; Refresh</button>
         <select id="session-format" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
           <option value="json">Export JSON</option>
           <option value="csv">Export CSV</option>
@@ -145,6 +167,35 @@
         <button class="btn primary" onclick="runViewportDist()">Analyze</button>
         <div id="viewport-result" style="margin-top:16px"></div>
       </div>
+
+      <h3 style="margin:24px 0 12px">Screenshot-Heatmap Overlay</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-row">
+          <div class="form-group" style="flex:2"><label>Session</label>
+            <select id="overlay-session" onchange="loadOverlayScreenshots()"></select>
+          </div>
+          <div class="form-group"><label>Screenshot</label>
+            <select id="overlay-screenshot"></select>
+          </div>
+        </div>
+        <button class="btn primary" onclick="renderOverlay()">Generate Overlay</button>
+        <div id="overlay-result" style="margin-top:16px;position:relative"></div>
+      </div>
+
+      <h3 style="margin:24px 0 12px">Time to First Fixation (AOI)</h3>
+      <div class="card" style="padding:16px">
+        <div class="form-row">
+          <div class="form-group" style="flex:2"><label>Session ID (or comma-separated IDs for aggregate)</label>
+            <input id="ttff-sessions" placeholder="session-id-1, session-id-2">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>AOIs (JSON array: [{name, x, y, width, height}] in 0-1 space)</label>
+          <textarea id="ttff-aois" rows="4" placeholder='[{"name":"Logo","x":0,"y":0,"width":0.15,"height":0.1},{"name":"CTA Button","x":0.3,"y":0.7,"width":0.4,"height":0.1}]'></textarea>
+        </div>
+        <button class="btn primary" onclick="runTTFF()">Analyze TTFF</button>
+        <div id="ttff-result" style="margin-top:16px"></div>
+      </div>
     </div>
 
     <!-- Studies Tab -->
@@ -173,6 +224,22 @@
         <button class="btn" onclick="loadWebhooks()">Refresh</button>
       </div>
       <div class="table-wrap" id="webhooks-table"></div>
+    </div>
+
+    <!-- Tasks Tab -->
+    <div class="tab-content" id="tab-tasks">
+      <div class="form-row" style="margin-bottom:16px">
+        <div class="form-group">
+          <label>Study</label>
+          <select id="task-study" onchange="loadTasks()"></select>
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px">
+          <button class="btn primary" onclick="showCreateTask()">New Task</button>
+          <button class="btn" onclick="loadTasks()">Refresh</button>
+        </div>
+      </div>
+      <div class="table-wrap" id="tasks-table"></div>
+      <div id="task-summary" style="margin-top:16px"></div>
     </div>
 
     <!-- Live Feed Tab -->

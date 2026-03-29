@@ -513,6 +513,67 @@ function viewportDistribution(url, sessionIds) {
   };
 }
 
+/* ========== TIME TO FIRST FIXATION ========== */
+
+/**
+ * Compute time-to-first-fixation (TTFF) for Areas of Interest (AOIs).
+ * AOIs are defined as normalized 0-1 rectangles: { name, x, y, width, height }.
+ * Returns an array of { aoi, ttff (ms), fixation } for each AOI that received a fixation,
+ * plus { aoi, ttff: null } for AOIs with no fixation.
+ */
+function timeToFirstFixation(sessionId, aois) {
+  if (!aois || aois.length === 0) return [];
+
+  const gazeEvents = db.prepare(
+    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp LIMIT 200000'
+  ).all(sessionId);
+
+  if (gazeEvents.length === 0) return aois.map(a => ({ aoi: a.name, ttff: null }));
+
+  const fixations = detectFixations(gazeEvents);
+  const sessionStart = gazeEvents[0].timestamp;
+
+  return aois.map(aoi => {
+    const hit = fixations.find(f =>
+      f.x >= aoi.x && f.x <= aoi.x + aoi.width &&
+      f.y >= aoi.y && f.y <= aoi.y + aoi.height
+    );
+    return {
+      aoi: aoi.name,
+      ttff: hit ? hit.startTime - sessionStart : null,
+      fixation: hit || null,
+    };
+  });
+}
+
+/**
+ * Aggregate TTFF across multiple sessions for the same AOIs.
+ * Returns per-AOI stats: mean, median, min, max TTFF and hit rate.
+ */
+function aggregateTTFF(sessionIds, aois) {
+  if (!sessionIds || sessionIds.length === 0 || !aois || aois.length === 0) return [];
+
+  const allResults = sessionIds.map(sid => timeToFirstFixation(sid, aois));
+
+  return aois.map((aoi, i) => {
+    const ttffs = allResults
+      .map(r => r[i].ttff)
+      .filter(t => t !== null);
+
+    const sorted = [...ttffs].sort((a, b) => a - b);
+    return {
+      aoi: aoi.name,
+      sessions: sessionIds.length,
+      hits: ttffs.length,
+      hitRate: Math.round((ttffs.length / sessionIds.length) * 100),
+      mean: ttffs.length > 0 ? Math.round(ttffs.reduce((s, t) => s + t, 0) / ttffs.length) : null,
+      median: sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : null,
+      min: sorted.length > 0 ? sorted[0] : null,
+      max: sorted.length > 0 ? sorted[sorted.length - 1] : null,
+    };
+  });
+}
+
 /* ========== SESSION SUMMARY ========== */
 
 function sessionSummary(sessionId) {
@@ -580,4 +641,6 @@ module.exports = {
   aggregateUrlHeatmap,
   decomposeByCohort,
   viewportDistribution,
+  timeToFirstFixation,
+  aggregateTTFF,
 };

@@ -49,7 +49,8 @@ document.querySelectorAll('.tab').forEach(tab => {
       case 'keys': loadKeys(); break;
       case 'studies': loadStudies(); break;
       case 'webhooks': loadWebhooks(); break;
-      case 'analytics': loadSessionList(); break;
+      case 'analytics': loadSessionList(); loadOverlaySessionList(); break;
+      case 'tasks': loadTaskStudies(); break;
     }
   });
 });
@@ -903,6 +904,429 @@ async function runViewportDist() {
   }
 }
 
+/* ========== SESSION FILTERING ========== */
+
+async function loadFilteredSessions() {
+  const params = new URLSearchParams();
+  const status = document.getElementById('filter-status').value;
+  const participant = document.getElementById('filter-participant').value.trim();
+  const tag = document.getElementById('filter-tag').value.trim();
+  const search = document.getElementById('filter-search').value.trim();
+  const studyId = document.getElementById('filter-study').value.trim();
+  const minDur = document.getElementById('filter-min-dur').value.trim();
+  const maxDur = document.getElementById('filter-max-dur').value.trim();
+
+  if (status) params.set('status', status);
+  if (participant) params.set('participantId', participant);
+  if (tag) params.set('tag', tag);
+  if (search) params.set('search', search);
+  if (studyId) params.set('studyId', studyId);
+  if (minDur) params.set('minDuration', minDur);
+  if (maxDur) params.set('maxDuration', maxDur);
+  params.set('limit', '100');
+
+  try {
+    const res = await api(`/sessions?${params.toString()}`);
+    const data = await res.json();
+    renderSessionTableWithTags(data.sessions, 'sessions-table');
+  } catch (err) {
+    document.getElementById('sessions-table').innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+function renderSessionTableWithTags(sessions, containerId) {
+  if (!sessions || sessions.length === 0) {
+    document.getElementById(containerId).innerHTML = '<p style="color:var(--text-muted);padding:20px">No sessions match filters</p>';
+    return;
+  }
+  document.getElementById(containerId).innerHTML = `
+    <table>
+      <tr><th>Session</th><th>Name</th><th>Started</th><th>Duration</th><th>Events</th><th>Tags</th><th>Status</th><th>Actions</th></tr>
+      ${sessions.map(s => `
+        <tr>
+          <td style="font-family:monospace;font-size:12px">${esc(s.id?.substring(0, 8) || '—')}...</td>
+          <td>${esc(s.session_name || '—')}</td>
+          <td>${s.start_time ? new Date(s.start_time).toLocaleString() : '—'}</td>
+          <td>${s.end_time ? fmtDuration(s.end_time - s.start_time) : '<span class="pill active">active</span>'}</td>
+          <td>${fmtNum(s.event_count || s.actual_event_count || 0)}</td>
+          <td>${(s.tags || []).map(t => `<span class="pill" style="font-size:10px;padding:2px 6px">${esc(t)}</span>`).join(' ') || '—'}</td>
+          <td>${s.end_time ? '<span class="pill ended">ended</span>' : '<span class="pill active">active</span>'}</td>
+          <td>
+            <button class="btn" onclick="viewSession('${esc(s.id)}')" style="padding:4px 10px;font-size:12px">View</button>
+            <button class="btn" onclick="showSessionDetail('${esc(s.id)}')" style="padding:4px 10px;font-size:12px">Detail</button>
+          </td>
+        </tr>
+      `).join('')}
+    </table>
+  `;
+}
+
+async function showSessionDetail(id) {
+  try {
+    const [sessionRes, tagsRes, annotationsRes] = await Promise.all([
+      api(`/sessions/${id}`),
+      api(`/sessions/${id}/tags`),
+      api(`/sessions/${id}/annotations`),
+    ]);
+    const { session } = await sessionRes.json();
+    const { tags } = await tagsRes.json();
+    const { annotations } = await annotationsRes.json();
+
+    showModal(`
+      <h2>Session Detail</h2>
+      <div style="font-family:monospace;font-size:12px;color:var(--text-muted);margin-bottom:12px">${esc(session.id)}</div>
+      <div class="card-grid" style="margin-bottom:16px">
+        <div class="card"><div class="label">Name</div><div class="value" style="font-size:16px">${esc(session.session_name || '—')}</div></div>
+        <div class="card"><div class="label">Duration</div><div class="value" style="font-size:16px">${session.end_time ? fmtDuration(session.end_time - session.start_time) : 'Active'}</div></div>
+        <div class="card"><div class="label">Events</div><div class="value" style="font-size:16px">${fmtNum(session.event_count)}</div></div>
+      </div>
+
+      <h3 style="margin-bottom:8px">Tags</h3>
+      <div id="session-tags-list" style="margin-bottom:12px">
+        ${tags.map(t => `<span class="pill" style="margin:2px">${esc(t)} <span style="cursor:pointer;margin-left:4px" onclick="removeTag('${esc(id)}','${esc(t)}')">&times;</span></span>`).join('') || '<span style="color:var(--text-muted)">No tags</span>'}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input id="new-tag-input" placeholder="Add tag..." style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
+        <button class="btn" onclick="addTag('${esc(id)}')">Add</button>
+      </div>
+
+      <h3 style="margin-bottom:8px">Annotations</h3>
+      <div id="session-annotations-list" style="max-height:200px;overflow-y:auto;margin-bottom:12px">
+        ${annotations.length === 0 ? '<span style="color:var(--text-muted)">No annotations</span>' :
+          annotations.map(a => `
+            <div class="card" style="padding:8px;margin-bottom:6px">
+              <div style="display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:12px;color:var(--text-muted)">${esc(a.author || 'Anonymous')} ${a.timestamp ? '@ ' + fmtDuration(a.timestamp) : ''}</span>
+                <button class="btn danger" onclick="deleteAnnotation(${Number(a.id)},'${esc(id)}')" style="padding:2px 6px;font-size:10px">Delete</button>
+              </div>
+              <div style="margin-top:4px;font-size:13px">${esc(a.text)}</div>
+            </div>
+          `).join('')}
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px">
+        <input id="new-annotation-text" placeholder="Add annotation..." style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
+        <input id="new-annotation-author" placeholder="Author" style="width:120px;background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
+        <button class="btn" onclick="addAnnotation('${esc(id)}')">Add</button>
+      </div>
+
+      <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
+    `);
+  } catch (err) { alert(err.message); }
+}
+
+async function addTag(sessionId) {
+  const tag = document.getElementById('new-tag-input').value.trim();
+  if (!tag) return;
+  try {
+    await api(`/sessions/${sessionId}/tags`, { method: 'POST', body: JSON.stringify({ tag }) });
+    showSessionDetail(sessionId);
+  } catch (err) { alert(err.message); }
+}
+
+async function removeTag(sessionId, tag) {
+  try {
+    await api(`/sessions/${sessionId}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
+    showSessionDetail(sessionId);
+  } catch (err) { alert(err.message); }
+}
+
+async function addAnnotation(sessionId) {
+  const text = document.getElementById('new-annotation-text').value.trim();
+  const author = document.getElementById('new-annotation-author').value.trim();
+  if (!text) return;
+  try {
+    await api(`/sessions/${sessionId}/annotations`, { method: 'POST', body: JSON.stringify({ text, author }) });
+    showSessionDetail(sessionId);
+  } catch (err) { alert(err.message); }
+}
+
+async function deleteAnnotation(annotationId, sessionId) {
+  try {
+    await api(`/sessions/annotations/${annotationId}`, { method: 'DELETE' });
+    showSessionDetail(sessionId);
+  } catch (err) { alert(err.message); }
+}
+
+/* ========== SCREENSHOT-HEATMAP OVERLAY ========== */
+
+async function loadOverlaySessionList() {
+  try {
+    const res = await api('/sessions?limit=200');
+    const data = await res.json();
+    const sel = document.getElementById('overlay-session');
+    sel.innerHTML = '<option value="">Select session...</option>' +
+      data.sessions.filter(s => s.screenshot_count > 0).map(s =>
+        `<option value="${esc(s.id)}">${esc(s.session_name || s.id.substring(0,8))} (${s.screenshot_count} screenshots)</option>`
+      ).join('');
+  } catch {}
+}
+
+async function loadOverlayScreenshots() {
+  const sessionId = document.getElementById('overlay-session').value;
+  const sel = document.getElementById('overlay-screenshot');
+  sel.innerHTML = '<option value="">Loading...</option>';
+  if (!sessionId) { sel.innerHTML = '<option value="">Select session first</option>'; return; }
+  try {
+    const res = await api(`/sessions/${sessionId}/screenshots`);
+    const { screenshots } = await res.json();
+    sel.innerHTML = screenshots.length === 0
+      ? '<option value="">No screenshots</option>'
+      : screenshots.map(s =>
+          `<option value="${Number(s.id)}" data-width="${s.width || 960}" data-height="${s.height || 540}">${esc(s.url || 'Unknown')} (${new Date(s.timestamp).toLocaleTimeString()}) ${s.width}x${s.height}</option>`
+        ).join('');
+  } catch { sel.innerHTML = '<option value="">Error loading</option>'; }
+}
+
+async function renderOverlay() {
+  const sessionId = document.getElementById('overlay-session').value;
+  const screenshotSel = document.getElementById('overlay-screenshot');
+  const screenshotId = screenshotSel.value;
+  const el = document.getElementById('overlay-result');
+
+  if (!sessionId || !screenshotId) { alert('Select session and screenshot'); return; }
+
+  const opt = screenshotSel.selectedOptions[0];
+  const imgW = parseInt(opt.dataset.width) || 960;
+  const imgH = parseInt(opt.dataset.height) || 540;
+  const canvasW = Math.min(imgW, 960);
+  const canvasH = Math.round(canvasW * (imgH / imgW));
+
+  el.innerHTML = '<div class="status-msg info">Loading overlay...</div>';
+
+  try {
+    const [heatmapRes] = await Promise.all([
+      api(`/analytics/heatmap/${sessionId}`),
+    ]);
+    const { heatmap } = await heatmapRes.json();
+
+    el.innerHTML = `
+      <div style="position:relative;display:inline-block">
+        <img id="overlay-img" width="${canvasW}" height="${canvasH}" style="display:block;border-radius:8px" />
+        <canvas id="overlay-canvas" width="${canvasW}" height="${canvasH}" style="position:absolute;top:0;left:0;opacity:0.6;border-radius:8px"></canvas>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">
+        Heatmap cells: ${fmtNum(heatmap.cells.length)} | Grid: ${heatmap.gridCols}x${heatmap.gridRows}
+      </div>
+    `;
+
+    // Load screenshot image via authenticated fetch
+    const imgRes = await fetch(`/api/screenshots/${screenshotId}`, { headers: authHeaders() });
+    if (!imgRes.ok) throw new Error('Failed to load screenshot');
+    const blob = await imgRes.blob();
+    const imgUrl = URL.createObjectURL(blob);
+    const img = document.getElementById('overlay-img');
+    img.onload = () => {
+      const canvas = document.getElementById('overlay-canvas');
+      drawHeatmapCells(canvas.getContext('2d'), heatmap, canvasW, canvasH);
+    };
+    img.src = imgUrl;
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== TIME TO FIRST FIXATION ========== */
+
+async function runTTFF() {
+  const sessionsInput = document.getElementById('ttff-sessions').value.trim();
+  const aoisInput = document.getElementById('ttff-aois').value.trim();
+  const el = document.getElementById('ttff-result');
+
+  if (!sessionsInput || !aoisInput) { alert('Enter session IDs and AOIs'); return; }
+
+  let aois;
+  try { aois = JSON.parse(aoisInput); } catch { alert('Invalid AOI JSON'); return; }
+  if (!Array.isArray(aois)) { alert('AOIs must be a JSON array'); return; }
+
+  const sessionIds = sessionsInput.split(',').map(s => s.trim()).filter(Boolean);
+  el.innerHTML = '<div class="status-msg info">Analyzing...</div>';
+
+  try {
+    const body = sessionIds.length === 1
+      ? { sessionId: sessionIds[0], aois }
+      : { sessionIds, aois };
+    const res = await api('/analytics/ttff', { method: 'POST', body: JSON.stringify(body) });
+    const data = await res.json();
+
+    const isAggregate = sessionIds.length > 1;
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:8px;padding:8px"><span style="font-size:13px;color:var(--text-muted)">
+        ${isAggregate ? `Aggregate across ${fmtNum(data.sessions)} sessions` : `Session: ${esc(data.sessionId)}`}
+      </span></div>
+      <table style="width:100%;font-size:13px">
+        <tr><th style="text-align:left;padding:6px">AOI</th>
+        ${isAggregate ? '<th>Hit Rate</th><th>Mean TTFF</th><th>Median</th><th>Min</th><th>Max</th>' : '<th>TTFF</th><th>Status</th>'}
+        </tr>
+        ${data.results.map(r => `
+          <tr>
+            <td style="padding:6px;font-weight:600">${esc(r.aoi)}</td>
+            ${isAggregate ? `
+              <td style="text-align:center;padding:6px">${r.hitRate}%</td>
+              <td style="text-align:center;padding:6px">${r.mean != null ? fmtDuration(r.mean) : '—'}</td>
+              <td style="text-align:center;padding:6px">${r.median != null ? fmtDuration(r.median) : '—'}</td>
+              <td style="text-align:center;padding:6px">${r.min != null ? fmtDuration(r.min) : '—'}</td>
+              <td style="text-align:center;padding:6px">${r.max != null ? fmtDuration(r.max) : '—'}</td>
+            ` : `
+              <td style="text-align:center;padding:6px">${r.ttff != null ? fmtDuration(r.ttff) : '—'}</td>
+              <td style="text-align:center;padding:6px">${r.ttff != null ? '<span class="pill active">Hit</span>' : '<span class="pill ended">Miss</span>'}</td>
+            `}
+          </tr>
+        `).join('')}
+      </table>
+    `;
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+/* ========== TASK MANAGEMENT ========== */
+
+async function loadTaskStudies() {
+  try {
+    const res = await api('/studies');
+    const { studies } = await res.json();
+    const sel = document.getElementById('task-study');
+    sel.innerHTML = '<option value="">Select study...</option>' +
+      studies.map(s => `<option value="${Number(s.id)}">${esc(s.name)}</option>`).join('');
+  } catch {}
+}
+
+async function loadTasks() {
+  const studyId = document.getElementById('task-study').value;
+  if (!studyId) {
+    document.getElementById('tasks-table').innerHTML = '<p style="color:var(--text-muted);padding:20px">Select a study</p>';
+    document.getElementById('task-summary').innerHTML = '';
+    return;
+  }
+  try {
+    const [tasksRes, summaryRes] = await Promise.all([
+      api(`/tasks/study/${studyId}`),
+      api(`/tasks/study/${studyId}/summary`),
+    ]);
+    const { tasks } = await tasksRes.json();
+    const { summary } = await summaryRes.json();
+
+    document.getElementById('tasks-table').innerHTML = tasks.length === 0
+      ? '<p style="color:var(--text-muted);padding:20px">No tasks defined for this study</p>'
+      : `<table>
+        <tr><th>ID</th><th>Name</th><th>Description</th><th>Target URL</th><th>Order</th><th>Actions</th></tr>
+        ${tasks.map(t => `
+          <tr>
+            <td>${esc(String(t.id))}</td>
+            <td>${esc(t.name)}</td>
+            <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${esc(t.description || '—')}</td>
+            <td style="font-size:12px;word-break:break-all">${esc(t.target_url || '—')}</td>
+            <td>${esc(String(t.sort_order))}</td>
+            <td>
+              <button class="btn" onclick="viewTaskInstances(${Number(t.id)})" style="padding:4px 10px;font-size:12px">Instances</button>
+              <button class="btn danger" onclick="deleteTask(${Number(t.id)})" style="padding:4px 10px;font-size:12px">Delete</button>
+            </td>
+          </tr>
+        `).join('')}
+      </table>`;
+
+    // Render summary
+    if (summary.length > 0) {
+      document.getElementById('task-summary').innerHTML = `
+        <h3 style="margin-bottom:12px">Task Completion Summary</h3>
+        <table style="width:100%;font-size:13px">
+          <tr><th style="text-align:left;padding:6px">Task</th><th>Attempts</th><th>Completed</th><th>Success Rate</th><th>Avg Duration</th><th>Median</th></tr>
+          ${summary.map(s => `
+            <tr>
+              <td style="padding:6px;font-weight:600">${esc(s.taskName)}</td>
+              <td style="text-align:center;padding:6px">${fmtNum(s.totalAttempts)}</td>
+              <td style="text-align:center;padding:6px">${fmtNum(s.completed)}</td>
+              <td style="text-align:center;padding:6px">
+                <span class="pill ${s.successRate >= 70 ? 'active' : s.successRate >= 40 ? '' : 'ended'}">${s.successRate}%</span>
+              </td>
+              <td style="text-align:center;padding:6px">${fmtDuration(s.avgDuration)}</td>
+              <td style="text-align:center;padding:6px">${fmtDuration(s.medianDuration)}</td>
+            </tr>
+          `).join('')}
+        </table>
+      `;
+    } else {
+      document.getElementById('task-summary').innerHTML = '';
+    }
+  } catch (err) {
+    document.getElementById('tasks-table').innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+function showCreateTask() {
+  const studyId = document.getElementById('task-study').value;
+  if (!studyId) { alert('Select a study first'); return; }
+  showModal(`
+    <h2>New Task</h2>
+    <div class="form-group"><label>Name</label><input id="task-name" placeholder="Find the contact page"></div>
+    <div class="form-group"><label>Description</label><textarea id="task-desc" rows="2" placeholder="Brief description"></textarea></div>
+    <div class="form-group"><label>Instructions</label><textarea id="task-instructions" rows="3" placeholder="Step-by-step instructions for the participant"></textarea></div>
+    <div class="form-group"><label>Target URL</label><input id="task-url" placeholder="/contact"></div>
+    <div class="form-group"><label>Success Criteria</label><input id="task-criteria" placeholder="Participant reaches the contact form"></div>
+    <div class="form-group"><label>Sort Order</label><input id="task-order" type="number" value="0"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn primary" onclick="createTask(${Number(studyId)})">Create</button>
+    </div>
+  `);
+}
+
+async function createTask(studyId) {
+  const name = document.getElementById('task-name').value.trim();
+  if (!name) { alert('Name required'); return; }
+  try {
+    await api('/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        studyId,
+        name,
+        description: document.getElementById('task-desc').value.trim(),
+        instructions: document.getElementById('task-instructions').value.trim(),
+        targetUrl: document.getElementById('task-url').value.trim(),
+        successCriteria: document.getElementById('task-criteria').value.trim(),
+        sortOrder: parseInt(document.getElementById('task-order').value) || 0,
+      }),
+    });
+    closeModal();
+    loadTasks();
+  } catch (err) { alert(err.message); }
+}
+
+async function deleteTask(id) {
+  if (!confirm('Delete this task and all its instances?')) return;
+  try {
+    await api(`/tasks/${id}`, { method: 'DELETE' });
+    loadTasks();
+  } catch (err) { alert(err.message); }
+}
+
+async function viewTaskInstances(taskId) {
+  try {
+    const res = await api(`/tasks/${taskId}/instances`);
+    const { instances } = await res.json();
+    showModal(`
+      <h2>Task Instances</h2>
+      ${instances.length === 0 ? '<p style="color:var(--text-muted)">No instances yet</p>' : `
+        <table style="font-size:13px">
+          <tr><th>Session</th><th>Participant</th><th>Status</th><th>Duration</th><th>Success</th><th>Notes</th></tr>
+          ${instances.map(i => `
+            <tr>
+              <td style="font-family:monospace;font-size:11px">${esc(i.session_id?.substring(0, 8) || '')}...</td>
+              <td>${esc(i.participant_id || '—')}</td>
+              <td><span class="pill ${i.status === 'completed' ? 'active' : i.status === 'abandoned' ? 'ended' : ''}">${esc(i.status)}</span></td>
+              <td>${fmtDuration(i.duration)}</td>
+              <td>${i.success ? 'Yes' : 'No'}</td>
+              <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis">${esc(i.notes || '—')}</td>
+            </tr>
+          `).join('')}
+        </table>
+      `}
+      <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
+    `);
+  } catch (err) { alert(err.message); }
+}
+
 // Initial load
 loadOverview();
 loadCohortStudies();
+loadTaskStudies();
