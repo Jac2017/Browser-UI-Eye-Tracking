@@ -313,4 +313,141 @@ router.post('/analytics/ttff', authenticate, (req, res) => {
   return res.status(400).json({ error: 'sessionId or sessionIds required' });
 });
 
+/* ========== FORM ANALYTICS ========== */
+
+// GET /analytics/forms/:sessionId — form interaction analytics
+router.get('/analytics/forms/:sessionId', authenticate, (req, res) => {
+  const sessionId = req.params.sessionId;
+
+  // Get all form-related events
+  const formEvents = db.prepare(
+    `SELECT type, timestamp, url, extra FROM events
+     WHERE session_id = ? AND type IN ('formFocus','formBlur','formSubmit','formError')
+     ORDER BY timestamp LIMIT 50000`
+  ).all(sessionId);
+
+  if (formEvents.length === 0) {
+    return res.json({ fields: [], submissions: [], errors: [], summary: { totalInteractions: 0 } });
+  }
+
+  // Parse extras and build analytics
+  const fieldStats = new Map();
+  const submissions = [];
+  const errors = [];
+
+  for (const ev of formEvents) {
+    let extra = {};
+    try { extra = JSON.parse(ev.extra || '{}'); } catch {}
+
+    if (ev.type === 'formBlur' && extra.fieldId) {
+      const key = `${ev.url || ''}|${extra.formId || ''}|${extra.fieldId}`;
+      if (!fieldStats.has(key)) {
+        fieldStats.set(key, {
+          url: ev.url || '',
+          formId: extra.formId || '',
+          fieldId: extra.fieldId,
+          fieldType: extra.fieldType || '',
+          fieldName: extra.fieldName || '',
+          required: extra.required || false,
+          interactions: 0,
+          totalDwell: 0,
+          changed: 0,
+          abandoned: 0,
+          dwellTimes: [],
+        });
+      }
+      const stat = fieldStats.get(key);
+      stat.interactions++;
+      if (extra.dwellTime) {
+        stat.totalDwell += extra.dwellTime;
+        stat.dwellTimes.push(extra.dwellTime);
+      }
+      if (extra.valueChanged) stat.changed++;
+      if (extra.abandoned) stat.abandoned++;
+    }
+
+    if (ev.type === 'formSubmit') {
+      submissions.push({
+        url: ev.url || '',
+        formId: extra.formId || '',
+        timestamp: ev.timestamp,
+        totalFields: extra.totalFields || 0,
+        filledFields: extra.filledFields || 0,
+        emptyRequired: extra.emptyRequired || 0,
+      });
+    }
+
+    if (ev.type === 'formError') {
+      errors.push({
+        url: ev.url || '',
+        fieldId: extra.fieldId || '',
+        fieldName: extra.fieldName || '',
+        message: extra.message || '',
+        timestamp: ev.timestamp,
+      });
+    }
+  }
+
+  // Build field summary with avg/median dwell
+  const fields = [...fieldStats.values()].map(f => {
+    const sorted = f.dwellTimes.sort((a, b) => a - b);
+    return {
+      url: f.url,
+      formId: f.formId,
+      fieldId: f.fieldId,
+      fieldType: f.fieldType,
+      fieldName: f.fieldName,
+      required: f.required,
+      interactions: f.interactions,
+      avgDwell: f.interactions > 0 ? Math.round(f.totalDwell / f.interactions) : 0,
+      medianDwell: sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0,
+      totalDwell: f.totalDwell,
+      changedCount: f.changed,
+      abandonedCount: f.abandoned,
+      abandonRate: f.interactions > 0 ? Math.round((f.abandoned / f.interactions) * 100) : 0,
+    };
+  }).sort((a, b) => b.totalDwell - a.totalDwell);
+
+  res.json({
+    fields,
+    submissions,
+    errors,
+    summary: {
+      totalInteractions: formEvents.length,
+      uniqueFields: fields.length,
+      totalSubmissions: submissions.length,
+      totalErrors: errors.length,
+      avgFieldsPerSubmission: submissions.length > 0
+        ? Math.round(submissions.reduce((s, sub) => s + sub.filledFields, 0) / submissions.length)
+        : 0,
+    },
+  });
+});
+
+/* ========== GAZE REPLAY DATA ========== */
+
+// GET /analytics/replay/:sessionId — gaze data for animated replay
+router.get('/analytics/replay/:sessionId', authenticate, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50000, 100000);
+
+  const gaze = db.prepare(
+    'SELECT x, y, timestamp FROM events WHERE session_id = ? AND type = \'gaze\' ORDER BY timestamp LIMIT ?'
+  ).all(req.params.sessionId, limit);
+
+  if (gaze.length === 0) return res.json({ points: [], duration: 0 });
+
+  const startTime = gaze[0].timestamp;
+  const points = gaze.map(p => ({
+    x: p.x,
+    y: p.y,
+    t: p.timestamp - startTime,
+  }));
+
+  res.json({
+    points,
+    duration: points[points.length - 1].t,
+    count: points.length,
+  });
+});
+
 module.exports = router;

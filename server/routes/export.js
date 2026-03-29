@@ -134,6 +134,58 @@ router.get('/export/study/:studyId', authenticate, (req, res) => {
   }
 
   res.write('],\n');
+
+  // Tasks
+  const tasks = db.prepare('SELECT * FROM tasks WHERE study_id = ?').all(study.id);
+  res.write(`"tasks":${JSON.stringify(tasks)},\n`);
+
+  // Task instances for all tasks in this study
+  if (tasks.length > 0) {
+    const taskIds = tasks.map(t => t.id);
+    const tiPh = taskIds.map(() => '?').join(',');
+    const taskInstances = db.prepare(
+      `SELECT * FROM task_instances WHERE task_id IN (${tiPh})`
+    ).all(...taskIds);
+    res.write(`"taskInstances":${JSON.stringify(taskInstances)},\n`);
+  } else {
+    res.write('"taskInstances":[],\n');
+  }
+
+  // Tags for all sessions in this study
+  if (sessionIds.length > 0) {
+    const tagPh = sessionIds.map(() => '?').join(',');
+    const tags = db.prepare(
+      `SELECT * FROM session_tags WHERE session_id IN (${tagPh})`
+    ).all(...sessionIds);
+    res.write(`"tags":${JSON.stringify(tags)},\n`);
+
+    // Annotations for all sessions
+    const annotations = db.prepare(
+      `SELECT * FROM session_annotations WHERE session_id IN (${tagPh})`
+    ).all(...sessionIds);
+    res.write(`"annotations":${JSON.stringify(annotations)},\n`);
+
+    // Web Vitals events (pagePerformance, webVital types)
+    const batchSize = 5000;
+    res.write('"webVitals":[');
+    let wvFirst = true;
+    const wvStmt = db.prepare(
+      "SELECT * FROM events WHERE session_id = ? AND type IN ('pagePerformance','webVital') ORDER BY timestamp LIMIT ?"
+    );
+    for (const sid of sessionIds) {
+      const vitals = wvStmt.all(sid, batchSize);
+      for (const v of vitals) {
+        try {
+          res.write((wvFirst ? '' : ',') + JSON.stringify(v));
+          wvFirst = false;
+        } catch {}
+      }
+    }
+    res.write('],\n');
+  } else {
+    res.write('"tags":[],\n"annotations":[],\n"webVitals":[],\n');
+  }
+
   res.write(`"exportDate":"${new Date().toISOString()}"\n`);
   res.end('}');
 });

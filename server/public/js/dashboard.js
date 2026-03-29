@@ -49,8 +49,9 @@ document.querySelectorAll('.tab').forEach(tab => {
       case 'keys': loadKeys(); break;
       case 'studies': loadStudies(); break;
       case 'webhooks': loadWebhooks(); break;
-      case 'analytics': loadSessionList(); loadOverlaySessionList(); break;
+      case 'analytics': loadSessionList(); loadOverlaySessionList(); loadReplaySessionList(); break;
       case 'tasks': loadTaskStudies(); break;
+      case 'forms': loadFormSessionList(); break;
     }
   });
 });
@@ -1324,6 +1325,407 @@ async function viewTaskInstances(taskId) {
       <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
     `);
   } catch (err) { alert(err.message); }
+}
+
+/* ========== GAZE REPLAY ========== */
+
+let replayData = null;
+let replayAnim = null;
+let replayPaused = false;
+let replayStartTs = 0;
+let replayPausedAt = 0;
+let replayTrails = [];
+
+async function loadReplayScreenshots() {
+  const sessionId = document.getElementById('replay-session').value;
+  const sel = document.getElementById('replay-screenshot');
+  sel.innerHTML = '<option value="">None (dark background)</option>';
+  if (!sessionId) return;
+  try {
+    const res = await api(`/sessions/${sessionId}/screenshots`);
+    const { screenshots } = await res.json();
+    sel.innerHTML = '<option value="">None (dark background)</option>' +
+      screenshots.map(s =>
+        `<option value="${Number(s.id)}">${esc(s.url || 'Unknown')} (${new Date(s.timestamp).toLocaleTimeString()})</option>`
+      ).join('');
+  } catch {}
+}
+
+async function loadReplaySessionList() {
+  try {
+    const res = await api('/sessions?limit=200');
+    const data = await res.json();
+    const sel = document.getElementById('replay-session');
+    sel.innerHTML = '<option value="">Select session...</option>' +
+      data.sessions.map(s =>
+        `<option value="${esc(s.id)}">${esc(s.session_name || s.id.substring(0,8))} (${fmtNum(s.event_count)} events)</option>`
+      ).join('');
+  } catch {}
+}
+
+async function startReplay() {
+  stopReplay();
+  const sessionId = document.getElementById('replay-session').value;
+  if (!sessionId) { alert('Select a session'); return; }
+
+  const container = document.getElementById('replay-container');
+  const progress = document.getElementById('replay-progress');
+  container.innerHTML = '<div class="status-msg info">Loading gaze data...</div>';
+
+  try {
+    const res = await api(`/analytics/replay/${sessionId}`);
+    replayData = await res.json();
+    if (replayData.points.length === 0) {
+      container.innerHTML = '<div class="status-msg error">No gaze data for this session</div>';
+      return;
+    }
+
+    // Check for optional screenshot background
+    const screenshotId = document.getElementById('replay-screenshot').value;
+    let bgHtml = '';
+    if (screenshotId) {
+      bgHtml = `<img id="replay-bg" width="960" height="540" style="display:block;border-radius:8px" />`;
+    }
+
+    container.innerHTML = `
+      <div class="aoi-editor" id="replay-canvas-wrap" style="width:960px;height:540px;background:#1a1a2e;border-radius:8px;overflow:hidden;position:relative">
+        ${bgHtml}
+        <div class="scanpath-dot" id="replay-dot" style="left:-20px;top:-20px"></div>
+      </div>
+    `;
+    progress.innerHTML = `
+      <div class="replay-progress">
+        <span id="replay-time">0:00</span>
+        <div class="bar" style="width:400px"><div class="bar-fill" id="replay-bar" style="width:0%"></div></div>
+        <span id="replay-total">${fmtDuration(replayData.duration)}</span>
+        <span id="replay-count">${fmtNum(replayData.count)} points</span>
+      </div>
+    `;
+
+    if (screenshotId) {
+      const imgRes = await fetch(`/api/screenshots/${screenshotId}`, { headers: authHeaders() });
+      if (imgRes.ok) {
+        const blob = await imgRes.blob();
+        document.getElementById('replay-bg').src = URL.createObjectURL(blob);
+      }
+    }
+
+    document.getElementById('replay-start-btn').style.display = 'none';
+    document.getElementById('replay-pause-btn').style.display = '';
+    document.getElementById('replay-stop-btn').style.display = '';
+    replayPaused = false;
+    replayTrails = [];
+    replayStartTs = performance.now();
+    replayPausedAt = 0;
+    animateReplay();
+  } catch (err) {
+    container.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
+}
+
+function animateReplay() {
+  if (!replayData) return;
+  const speed = parseFloat(document.getElementById('replay-speed').value) || 1;
+  const duration = replayData.duration;
+  const points = replayData.points;
+  const wrap = document.getElementById('replay-canvas-wrap');
+  const dot = document.getElementById('replay-dot');
+
+  function frame() {
+    if (!replayData) return;
+    if (replayPaused) { replayAnim = requestAnimationFrame(frame); return; }
+
+    const elapsed = (performance.now() - replayStartTs) * speed;
+    const pct = Math.min(elapsed / duration, 1);
+
+    // Find current point
+    const targetT = elapsed;
+    let idx = 0;
+    for (let i = 0; i < points.length; i++) {
+      if (points[i].t <= targetT) idx = i;
+      else break;
+    }
+
+    const pt = points[idx];
+    const px = pt.x * 960;
+    const py = pt.y * 540;
+    dot.style.left = px + 'px';
+    dot.style.top = py + 'px';
+
+    // Add trail dot
+    if (replayTrails.length < 500) {
+      const trail = document.createElement('div');
+      trail.className = 'scanpath-trail';
+      trail.style.left = px + 'px';
+      trail.style.top = py + 'px';
+      wrap.appendChild(trail);
+      replayTrails.push(trail);
+      // Fade old trails
+      if (replayTrails.length > 50) {
+        const old = replayTrails.shift();
+        old.remove();
+      }
+    }
+
+    // Update progress
+    document.getElementById('replay-bar').style.width = (pct * 100) + '%';
+    document.getElementById('replay-time').textContent = fmtDuration(elapsed);
+
+    if (pct >= 1) {
+      stopReplay();
+      return;
+    }
+    replayAnim = requestAnimationFrame(frame);
+  }
+  replayAnim = requestAnimationFrame(frame);
+}
+
+function toggleReplayPause() {
+  replayPaused = !replayPaused;
+  document.getElementById('replay-pause-btn').textContent = replayPaused ? 'Resume' : 'Pause';
+  if (!replayPaused) {
+    // Adjust start time for paused duration
+    replayStartTs += performance.now() - replayPausedAt;
+  } else {
+    replayPausedAt = performance.now();
+  }
+}
+
+function stopReplay() {
+  if (replayAnim) cancelAnimationFrame(replayAnim);
+  replayAnim = null;
+  replayData = null;
+  replayTrails = [];
+  document.getElementById('replay-start-btn').style.display = '';
+  document.getElementById('replay-pause-btn').style.display = 'none';
+  document.getElementById('replay-stop-btn').style.display = 'none';
+}
+
+/* ========== VISUAL AOI EDITOR ========== */
+
+let aoiList = [];
+let aoiDrawing = false;
+let aoiStart = null;
+
+function initAoiEditor() {
+  const sessionId = document.getElementById('overlay-session').value;
+  const screenshotId = document.getElementById('overlay-screenshot').value;
+  if (!screenshotId) { alert('Select a screenshot first to use as AOI background'); return; }
+
+  const el = document.getElementById('overlay-result');
+  el.innerHTML = `
+    <div class="aoi-editor" id="aoi-canvas" style="width:960px;height:540px;background:#1a1a2e;border-radius:8px;overflow:hidden;position:relative">
+      <img id="aoi-bg" width="960" height="540" style="display:block;opacity:0.7" />
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--text-muted)">Click and drag to draw AOI rectangles. Named sequentially.</div>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap" id="aoi-list-display"></div>
+    <div style="margin-top:12px;display:flex;gap:8px">
+      <button class="btn" onclick="clearAois()">Clear All</button>
+      <button class="btn primary" onclick="copyAoisToTTFF()">Copy to TTFF</button>
+    </div>
+  `;
+
+  // Load screenshot
+  fetch(`/api/screenshots/${screenshotId}`, { headers: authHeaders() })
+    .then(r => r.blob())
+    .then(blob => { document.getElementById('aoi-bg').src = URL.createObjectURL(blob); });
+
+  const canvas = document.getElementById('aoi-canvas');
+  aoiList = [];
+
+  canvas.addEventListener('mousedown', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    aoiDrawing = true;
+    aoiStart = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+  });
+
+  canvas.addEventListener('mousemove', (e) => {
+    if (!aoiDrawing) return;
+    const rect = canvas.getBoundingClientRect();
+    const cur = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+    // Remove preview rect
+    const prev = document.getElementById('aoi-preview');
+    if (prev) prev.remove();
+    const div = document.createElement('div');
+    div.id = 'aoi-preview';
+    div.className = 'aoi-rect';
+    const left = Math.min(aoiStart.x, cur.x) * 100;
+    const top = Math.min(aoiStart.y, cur.y) * 100;
+    const w = Math.abs(cur.x - aoiStart.x) * 100;
+    const h = Math.abs(cur.y - aoiStart.y) * 100;
+    div.style.left = left + '%'; div.style.top = top + '%';
+    div.style.width = w + '%'; div.style.height = h + '%';
+    canvas.appendChild(div);
+  });
+
+  canvas.addEventListener('mouseup', (e) => {
+    if (!aoiDrawing) return;
+    aoiDrawing = false;
+    const rect = canvas.getBoundingClientRect();
+    const end = { x: (e.clientX - rect.left) / rect.width, y: (e.clientY - rect.top) / rect.height };
+    const prev = document.getElementById('aoi-preview');
+    if (prev) prev.remove();
+
+    const x = Math.min(aoiStart.x, end.x);
+    const y = Math.min(aoiStart.y, end.y);
+    const w = Math.abs(end.x - aoiStart.x);
+    const h = Math.abs(end.y - aoiStart.y);
+
+    if (w < 0.01 || h < 0.01) return; // Too small
+
+    const name = prompt('AOI Name:', `AOI ${aoiList.length + 1}`);
+    if (!name) return;
+
+    aoiList.push({ name, x: Math.round(x * 1000) / 1000, y: Math.round(y * 1000) / 1000, width: Math.round(w * 1000) / 1000, height: Math.round(h * 1000) / 1000 });
+
+    // Draw permanent rect
+    const div = document.createElement('div');
+    div.className = 'aoi-rect';
+    div.style.left = (x * 100) + '%'; div.style.top = (y * 100) + '%';
+    div.style.width = (w * 100) + '%'; div.style.height = (h * 100) + '%';
+    div.innerHTML = `<span class="aoi-label">${esc(name)}</span>`;
+    canvas.appendChild(div);
+
+    updateAoiDisplay();
+  });
+}
+
+function updateAoiDisplay() {
+  const el = document.getElementById('aoi-list-display');
+  if (!el) return;
+  el.innerHTML = aoiList.map((a, i) =>
+    `<span class="pill active" style="font-size:11px">${esc(a.name)} (${a.x.toFixed(2)},${a.y.toFixed(2)} ${a.width.toFixed(2)}x${a.height.toFixed(2)})</span>`
+  ).join('');
+}
+
+function clearAois() {
+  aoiList = [];
+  const canvas = document.getElementById('aoi-canvas');
+  if (canvas) {
+    canvas.querySelectorAll('.aoi-rect').forEach(r => r.remove());
+  }
+  updateAoiDisplay();
+}
+
+function copyAoisToTTFF() {
+  if (aoiList.length === 0) { alert('No AOIs defined'); return; }
+  document.getElementById('ttff-aois').value = JSON.stringify(aoiList, null, 2);
+  // Also set session
+  const sid = document.getElementById('overlay-session').value;
+  if (sid) document.getElementById('ttff-sessions').value = sid;
+  alert('AOIs copied to TTFF panel. Scroll down to run the analysis.');
+}
+
+/* ========== FORM ANALYTICS ========== */
+
+async function loadFormSessionList() {
+  try {
+    const res = await api('/sessions?limit=200');
+    const data = await res.json();
+    const sel = document.getElementById('form-session');
+    sel.innerHTML = '<option value="">Select session...</option>' +
+      data.sessions.map(s =>
+        `<option value="${esc(s.id)}">${esc(s.session_name || s.id.substring(0,8))} (${fmtNum(s.event_count)} events)</option>`
+      ).join('');
+  } catch {}
+}
+
+async function loadFormAnalytics() {
+  const sessionId = document.getElementById('form-session').value;
+  const el = document.getElementById('form-analytics-result');
+  if (!sessionId) { el.innerHTML = '<p style="color:var(--text-muted)">Select a session</p>'; return; }
+
+  el.innerHTML = '<div class="status-msg info">Analyzing form interactions...</div>';
+
+  try {
+    const res = await api(`/analytics/forms/${sessionId}`);
+    const data = await res.json();
+
+    if (data.summary.totalInteractions === 0) {
+      el.innerHTML = '<div class="status-msg" style="background:rgba(139,148,158,0.1);border:1px solid var(--border)">No form interactions found in this session.</div>';
+      return;
+    }
+
+    const maxDwell = Math.max(...data.fields.map(f => f.totalDwell), 1);
+
+    let html = `
+      <div class="card-grid">
+        <div class="card"><div class="label">Total Interactions</div><div class="value">${fmtNum(data.summary.totalInteractions)}</div></div>
+        <div class="card"><div class="label">Unique Fields</div><div class="value">${fmtNum(data.summary.uniqueFields)}</div></div>
+        <div class="card"><div class="label">Submissions</div><div class="value">${fmtNum(data.summary.totalSubmissions)}</div></div>
+        <div class="card"><div class="label">Errors</div><div class="value ${data.summary.totalErrors > 0 ? 'red' : ''}">${fmtNum(data.summary.totalErrors)}</div></div>
+      </div>
+
+      <h3 style="margin-bottom:12px">Field Dwell Time</h3>
+      <div class="card" style="padding:16px;margin-bottom:16px">
+        <table style="width:100%;font-size:13px">
+          <tr><th style="text-align:left">Field</th><th>Type</th><th>Req</th><th>Visits</th><th>Avg Dwell</th><th>Total Dwell</th><th>Changed</th><th>Abandon Rate</th><th style="width:200px">Dwell</th></tr>
+          ${data.fields.map(f => `
+            <tr>
+              <td style="font-weight:600">${esc(f.fieldName || f.fieldId)}</td>
+              <td>${esc(f.fieldType)}</td>
+              <td>${f.required ? '<span class="pill active" style="font-size:9px">req</span>' : ''}</td>
+              <td style="text-align:center">${fmtNum(f.interactions)}</td>
+              <td style="text-align:center">${fmtDuration(f.avgDwell)}</td>
+              <td style="text-align:center">${fmtDuration(f.totalDwell)}</td>
+              <td style="text-align:center">${fmtNum(f.changedCount)}</td>
+              <td style="text-align:center">
+                <span class="pill ${f.abandonRate > 30 ? 'ended' : f.abandonRate > 10 ? '' : 'active'}">${f.abandonRate}%</span>
+              </td>
+              <td>
+                <div style="height:8px;background:var(--border);border-radius:4px;overflow:hidden">
+                  <div class="dwell-bar" style="width:${(f.totalDwell/maxDwell*100).toFixed(0)}%"></div>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </table>
+      </div>
+    `;
+
+    if (data.submissions.length > 0) {
+      html += `
+        <h3 style="margin-bottom:12px">Form Submissions</h3>
+        <div class="card" style="padding:16px;margin-bottom:16px">
+          <table style="width:100%;font-size:13px">
+            <tr><th style="text-align:left">URL</th><th>Form</th><th>Time</th><th>Total Fields</th><th>Filled</th><th>Empty Required</th></tr>
+            ${data.submissions.map(s => `
+              <tr>
+                <td style="word-break:break-all;max-width:300px">${esc(s.url)}</td>
+                <td>${esc(s.formId || '—')}</td>
+                <td>${new Date(s.timestamp).toLocaleTimeString()}</td>
+                <td style="text-align:center">${fmtNum(s.totalFields)}</td>
+                <td style="text-align:center">${fmtNum(s.filledFields)}</td>
+                <td style="text-align:center;${s.emptyRequired > 0 ? 'color:var(--red)' : ''}">${fmtNum(s.emptyRequired)}</td>
+              </tr>
+            `).join('')}
+          </table>
+        </div>
+      `;
+    }
+
+    if (data.errors.length > 0) {
+      html += `
+        <h3 style="margin-bottom:12px">Validation Errors</h3>
+        <div class="card" style="padding:16px">
+          <table style="width:100%;font-size:13px">
+            <tr><th style="text-align:left">Field</th><th>Message</th><th>Time</th></tr>
+            ${data.errors.slice(0, 50).map(e => `
+              <tr>
+                <td style="font-weight:600">${esc(e.fieldName || e.fieldId)}</td>
+                <td>${esc(e.message)}</td>
+                <td>${new Date(e.timestamp).toLocaleTimeString()}</td>
+              </tr>
+            `).join('')}
+          </table>
+        </div>
+      `;
+    }
+
+    el.innerHTML = html;
+  } catch (err) {
+    el.innerHTML = `<div class="status-msg error">${esc(err.message)}</div>`;
+  }
 }
 
 // Initial load
