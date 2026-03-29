@@ -11,16 +11,27 @@ const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 12;  // 96-bit IV for GCM
 const TAG_LENGTH = 16; // 128-bit auth tag
 
-// Cache derived keys per API key string
+// Cache derived keys per API key string with TTL
+const KEY_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 const keyCache = new Map();
 
 function deriveKey(apiKey) {
-  if (keyCache.has(apiKey)) return keyCache.get(apiKey);
+  const cached = keyCache.get(apiKey);
+  if (cached && Date.now() - cached.time < KEY_CACHE_TTL) return cached.key;
 
   const key = crypto.pbkdf2Sync(
     apiKey, SALT, ITERATIONS, KEY_LENGTH, 'sha256'
   );
-  keyCache.set(apiKey, key);
+  keyCache.set(apiKey, { key, time: Date.now() });
+
+  // Lazy cleanup: remove expired entries when cache grows
+  if (keyCache.size > 100) {
+    const now = Date.now();
+    for (const [k, v] of keyCache) {
+      if (now - v.time >= KEY_CACHE_TTL) keyCache.delete(k);
+    }
+  }
+
   return key;
 }
 

@@ -89,22 +89,48 @@ router.get('/export/study/:studyId', authenticate, (req, res) => {
   const sessions = db.prepare('SELECT * FROM sessions WHERE study_id = ?').all(study.id);
 
   const sessionIds = sessions.map(s => s.id);
-  let events = [];
+  const maxExportEvents = Math.min(parseInt(req.query.limit) || 500000, 1000000);
+
+  // Stream events in batches to avoid loading all into memory
+  const studyName = study.name.replace(/[^a-zA-Z0-9_-]/g, '_');
+  res.set('Content-Type', 'application/json');
+  res.set('Content-Disposition', `attachment; filename="study_${study.id}_${studyName}.json"`);
+
+  res.write('{\n');
+  res.write(`"study":${JSON.stringify({ ...study, target_urls: JSON.parse(study.target_urls), config: JSON.parse(study.config) })},\n`);
+  res.write(`"participants":${JSON.stringify(participants)},\n`);
+  res.write(`"sessions":${JSON.stringify(sessions)},\n`);
+  res.write('"events":[');
+
   if (sessionIds.length > 0) {
-    const placeholders = sessionIds.map(() => '?').join(',');
-    events = db.prepare(
-      `SELECT * FROM events WHERE session_id IN (${placeholders}) ORDER BY timestamp`
-    ).all(...sessionIds);
+    const batchSize = 5000;
+    let totalWritten = 0;
+    let first = true;
+    const stmt = db.prepare(
+      'SELECT * FROM events WHERE session_id = ? ORDER BY timestamp LIMIT ? OFFSET ?'
+    );
+
+    for (const sid of sessionIds) {
+      if (totalWritten >= maxExportEvents) break;
+      let offset = 0;
+      while (totalWritten < maxExportEvents) {
+        const remaining = maxExportEvents - totalWritten;
+        const batch = stmt.all(sid, Math.min(batchSize, remaining), offset);
+        if (batch.length === 0) break;
+        for (const row of batch) {
+          res.write((first ? '' : ',') + JSON.stringify(row));
+          first = false;
+        }
+        totalWritten += batch.length;
+        offset += batch.length;
+        if (batch.length < batchSize) break;
+      }
+    }
   }
 
-  res.set('Content-Disposition', `attachment; filename="study_${study.id}_${study.name}.json"`);
-  res.json({
-    study: { ...study, target_urls: JSON.parse(study.target_urls), config: JSON.parse(study.config) },
-    participants,
-    sessions,
-    events,
-    exportDate: new Date().toISOString(),
-  });
+  res.write('],\n');
+  res.write(`"exportDate":"${new Date().toISOString()}"\n`);
+  res.end('}');
 });
 
 module.exports = router;

@@ -128,10 +128,10 @@ async function loadOverview() {
     const data = await res.json();
 
     document.getElementById('overview-cards').innerHTML = `
-      <div class="card"><div class="label">Total Sessions</div><div class="value">${data.sessions}</div></div>
+      <div class="card"><div class="label">Total Sessions</div><div class="value">${esc(String(data.sessions))}</div></div>
       <div class="card"><div class="label">Total Events</div><div class="value">${fmtNum(data.events)}</div></div>
       <div class="card"><div class="label">Screenshots</div><div class="value">${fmtNum(data.screenshots)}</div></div>
-      <div class="card"><div class="label">Active Now</div><div class="value green" id="active-sessions">${data.recentSessions.filter(s => !s.end_time).length}</div></div>
+      <div class="card"><div class="label">Active Now</div><div class="value green" id="active-sessions">${esc(String(data.recentSessions.filter(s => !s.end_time).length))}</div></div>
     `;
 
     // Event distribution
@@ -287,8 +287,8 @@ function renderSummary(summary, el) {
       <div class="card"><div class="label">Total Events</div><div class="value">${fmtNum(summary.totalEvents)}</div></div>
       <div class="card"><div class="label">Duration</div><div class="value">${fmtDuration(summary.duration)}</div></div>
       <div class="card"><div class="label">Gaze Points</div><div class="value">${fmtNum(summary.gazePoints)}</div></div>
-      <div class="card"><div class="label">Fixations</div><div class="value">${summary.fixations}</div></div>
-      <div class="card"><div class="label">Avg Fixation</div><div class="value">${summary.avgFixationDuration}ms</div></div>
+      <div class="card"><div class="label">Fixations</div><div class="value">${esc(String(summary.fixations))}</div></div>
+      <div class="card"><div class="label">Avg Fixation</div><div class="value">${esc(String(summary.avgFixationDuration))}ms</div></div>
     </div>
     <div class="card-grid">
       <div class="card" style="text-align:center">
@@ -457,10 +457,10 @@ async function loadStudies() {
         <tr><th>ID</th><th>Name</th><th>Status</th><th>Participants</th><th>URLs</th><th>Actions</th></tr>
         ${studies.map(s => `
           <tr>
-            <td>${s.id}</td>
+            <td>${esc(String(s.id))}</td>
             <td>${esc(s.name)}</td>
             <td><span class="pill ${s.status === 'active' ? 'active' : 'ended'}">${esc(s.status)}</span></td>
-            <td>${s.participant_count}</td>
+            <td>${esc(String(s.participant_count))}</td>
             <td>${(s.target_urls || []).length} URLs</td>
             <td>
               <button class="btn" onclick="viewStudy(${s.id})" style="padding:4px 10px;font-size:12px">View</button>

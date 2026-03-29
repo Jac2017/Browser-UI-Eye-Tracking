@@ -922,6 +922,13 @@
     flushEventBuffer();
   }
 
+  // Flush remaining events on page unload to minimize data loss
+  window.addEventListener('beforeunload', () => {
+    if (state.recordingActive && state.eventBuffer.length > 0) {
+      flushEventBuffer();
+    }
+  });
+
   function isChannelEnabled(channel) {
     if (!state.settings?.channels) return true;
     return state.settings.channels[channel] !== false;
@@ -1565,32 +1572,34 @@
       EyedVideoTracker.init();
     }
 
-    // Load settings
+    // Load settings first, then check tracking/recording state
+    // This avoids a race where channels/screenshots start with wrong settings
     chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }, (response) => {
       if (chrome.runtime.lastError) return;
       if (response?.settings) state.settings = response.settings;
-    });
 
-    chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' }, (response) => {
-      if (chrome.runtime.lastError) return;
-      if (response?.active) {
-        state.trackingActive = true;
-        document.getElementById('eyed-tracking-indicator')?.classList.add('active');
-        document.getElementById('eyed-gaze-cursor')?.classList.add('active');
-      }
-    });
-
-    chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATE' }, (response) => {
-      if (chrome.runtime.lastError) return;
-      if (response?.recording) {
-        state.recordingActive = true;
-        startEventFlushTimer();
-        document.getElementById('eyed-tracking-indicator')?.classList.add('recording');
-        if (isChannelEnabled('autoScreenshots')) startAutoScreenshots();
-        if (isChannelEnabled('screenshotOnLoad')) {
-          setTimeout(() => captureAutoScreenshot('pageLoad'), 2000);
+      // Now that settings are loaded, check tracking and recording state
+      chrome.runtime.sendMessage({ type: 'GET_TRACKING_STATE' }, (tResponse) => {
+        if (chrome.runtime.lastError) return;
+        if (tResponse?.active) {
+          state.trackingActive = true;
+          document.getElementById('eyed-tracking-indicator')?.classList.add('active');
+          document.getElementById('eyed-gaze-cursor')?.classList.add('active');
         }
-      }
+      });
+
+      chrome.runtime.sendMessage({ type: 'GET_RECORDING_STATE' }, (rResponse) => {
+        if (chrome.runtime.lastError) return;
+        if (rResponse?.recording) {
+          state.recordingActive = true;
+          startEventFlushTimer();
+          document.getElementById('eyed-tracking-indicator')?.classList.add('recording');
+          if (isChannelEnabled('autoScreenshots')) startAutoScreenshots();
+          if (isChannelEnabled('screenshotOnLoad')) {
+            setTimeout(() => captureAutoScreenshot('pageLoad'), 2000);
+          }
+        }
+      });
     });
 
     state.isNewPage = true;

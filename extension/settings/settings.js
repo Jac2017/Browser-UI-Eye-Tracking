@@ -76,7 +76,10 @@ function validateEndpoint(url) {
     if (u.protocol !== 'https:') return null; // Must be HTTPS
     const host = u.hostname.toLowerCase();
     if (host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '0.0.0.0') return null;
-    if (host.startsWith('10.') || host.startsWith('192.168.') || host.startsWith('172.')) return null;
+    if (host.startsWith('10.') || host.startsWith('192.168.')) return null;
+    // 172.16.0.0 – 172.31.255.255 (private range)
+    const m172 = host.match(/^172\.(\d+)\./);
+    if (m172 && parseInt(m172[1], 10) >= 16 && parseInt(m172[1], 10) <= 31) return null;
     if (host.endsWith('.local')) return null;
     return u.toString();
   } catch {

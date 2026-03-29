@@ -16,48 +16,67 @@ function detectFixations(gazeEvents) {
   const fixations = [];
   let windowStart = 0;
 
+  // Track min/max incrementally to avoid O(n²) slicing
+  let minX = gazeEvents[0].x, maxX = gazeEvents[0].x;
+  let minY = gazeEvents[0].y, maxY = gazeEvents[0].y;
+
   for (let windowEnd = 1; windowEnd < gazeEvents.length; windowEnd++) {
-    const window = gazeEvents.slice(windowStart, windowEnd + 1);
-    const xs = window.map(e => e.x);
-    const ys = window.map(e => e.y);
-    const dispersion = (Math.max(...xs) - Math.min(...xs)) + (Math.max(...ys) - Math.min(...ys));
+    const pt = gazeEvents[windowEnd];
+    minX = Math.min(minX, pt.x);
+    maxX = Math.max(maxX, pt.x);
+    minY = Math.min(minY, pt.y);
+    maxY = Math.max(maxY, pt.y);
+
+    const dispersion = (maxX - minX) + (maxY - minY);
 
     if (dispersion <= DISPERSION_THRESHOLD) {
       continue; // expand window
     }
 
-    // Window exceeded threshold — check if valid fixation
-    const fixWindow = gazeEvents.slice(windowStart, windowEnd);
-    const duration = fixWindow[fixWindow.length - 1].timestamp - fixWindow[0].timestamp;
-
-    if (duration >= MIN_FIXATION_DURATION && fixWindow.length >= 2) {
-      const cx = fixWindow.reduce((s, e) => s + e.x, 0) / fixWindow.length;
-      const cy = fixWindow.reduce((s, e) => s + e.y, 0) / fixWindow.length;
-      fixations.push({
-        x: cx,
-        y: cy,
-        startTime: fixWindow[0].timestamp,
-        endTime: fixWindow[fixWindow.length - 1].timestamp,
-        duration,
-        pointCount: fixWindow.length,
-      });
+    // Window exceeded threshold — check if valid fixation (windowStart..windowEnd-1)
+    const fixLen = windowEnd - windowStart;
+    if (fixLen >= 2) {
+      const duration = gazeEvents[windowEnd - 1].timestamp - gazeEvents[windowStart].timestamp;
+      if (duration >= MIN_FIXATION_DURATION) {
+        let sumX = 0, sumY = 0;
+        for (let i = windowStart; i < windowEnd; i++) {
+          sumX += gazeEvents[i].x;
+          sumY += gazeEvents[i].y;
+        }
+        fixations.push({
+          x: sumX / fixLen,
+          y: sumY / fixLen,
+          startTime: gazeEvents[windowStart].timestamp,
+          endTime: gazeEvents[windowEnd - 1].timestamp,
+          duration,
+          pointCount: fixLen,
+        });
+      }
     }
+
     windowStart = windowEnd;
+    // Reset min/max for new window starting at windowEnd
+    minX = maxX = pt.x;
+    minY = maxY = pt.y;
   }
 
   // Handle last window
-  const remaining = gazeEvents.slice(windowStart);
-  if (remaining.length >= 2) {
-    const duration = remaining[remaining.length - 1].timestamp - remaining[0].timestamp;
+  const remLen = gazeEvents.length - windowStart;
+  if (remLen >= 2) {
+    const duration = gazeEvents[gazeEvents.length - 1].timestamp - gazeEvents[windowStart].timestamp;
     if (duration >= MIN_FIXATION_DURATION) {
-      const cx = remaining.reduce((s, e) => s + e.x, 0) / remaining.length;
-      const cy = remaining.reduce((s, e) => s + e.y, 0) / remaining.length;
+      let sumX = 0, sumY = 0;
+      for (let i = windowStart; i < gazeEvents.length; i++) {
+        sumX += gazeEvents[i].x;
+        sumY += gazeEvents[i].y;
+      }
       fixations.push({
-        x: cx, y: cy,
-        startTime: remaining[0].timestamp,
-        endTime: remaining[remaining.length - 1].timestamp,
+        x: sumX / remLen,
+        y: sumY / remLen,
+        startTime: gazeEvents[windowStart].timestamp,
+        endTime: gazeEvents[gazeEvents.length - 1].timestamp,
         duration,
-        pointCount: remaining.length,
+        pointCount: remLen,
       });
     }
   }
