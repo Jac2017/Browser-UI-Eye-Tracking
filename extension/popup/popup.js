@@ -5,6 +5,9 @@
 
 const $ = (sel) => document.querySelector(sel);
 
+// Track overlay toggle states
+const overlayStates = { heatmap: false, scanpath: false, cursor: false };
+
 /* ========== STATUS UPDATE ========== */
 async function updateStatus() {
   try {
@@ -12,25 +15,25 @@ async function updateStatus() {
 
     if (bgState?.trackerTabId) {
       $('#tracker-status').textContent = 'Running';
-      $('#tracker-status').className = 'status-value on';
+      $('#tracker-status').className = 'stat-val on';
     } else {
-      $('#tracker-status').textContent = 'Not running';
-      $('#tracker-status').className = 'status-value off';
+      $('#tracker-status').textContent = 'Off';
+      $('#tracker-status').className = 'stat-val off';
     }
 
     if (bgState?.active) {
       $('#tracking-status').textContent = 'Active';
-      $('#tracking-status').className = 'status-value on';
+      $('#tracking-status').className = 'stat-val on';
       $('#btn-start').disabled = true;
       $('#btn-stop').disabled = false;
     } else if (bgState?.modelReady) {
       $('#tracking-status').textContent = 'Ready';
-      $('#tracking-status').className = 'status-value active';
+      $('#tracking-status').className = 'stat-val active';
       $('#btn-start').disabled = false;
       $('#btn-stop').disabled = true;
     } else {
-      $('#tracking-status').textContent = 'No model';
-      $('#tracking-status').className = 'status-value off';
+      $('#tracking-status').textContent = 'Idle';
+      $('#tracking-status').className = 'stat-val off';
       $('#btn-start').disabled = true;
       $('#btn-stop').disabled = true;
     }
@@ -48,39 +51,40 @@ async function updateStatus() {
       dot.className = 'rec-dot on';
       label.textContent = 'Stop Recording';
       btn.classList.add('recording-active');
-      recStatus.textContent = 'Active';
-      recStatus.className = 'status-value on';
+      recStatus.textContent = 'On';
+      recStatus.className = 'stat-val on';
     } else {
       dot.className = 'rec-dot off';
       label.textContent = 'Start Recording';
       btn.classList.remove('recording-active');
       recStatus.textContent = 'Off';
-      recStatus.className = 'status-value off';
+      recStatus.className = 'stat-val off';
     }
   } catch (e) {}
 
   // Update network status
   try {
     const netState = await chrome.runtime.sendMessage({ type: 'GET_NETWORK_STATUS' });
-    const netEl = $('#network-status');
+    const netDot = $('#network-dot');
     const queueEl = $('#queue-status');
     if (netState) {
-      const statusMap = {
-        'connected': ['Connected', 'on'],
-        'disconnected': ['Disconnected', 'off'],
-        'error': ['Error', 'off'],
-        'auth-error': ['Auth Failed', 'off'],
-        'no-key': ['No API Key', 'off'],
-        'unknown': ['Unknown', 'off'],
-      };
-      const [text, cls] = statusMap[netState.network] || ['Unknown', 'off'];
-      netEl.textContent = text;
-      netEl.className = `status-value ${cls}`;
-      queueEl.textContent = `${netState.queueSize} events, ${netState.screenshotQueue} screenshots`;
-      queueEl.className = netState.queueSize > 0 ? 'status-value active' : 'status-value off';
+      if (netState.network === 'connected') {
+        netDot.className = 'net-dot on';
+        netDot.title = 'Server connected';
+      } else if (netState.network === 'error' || netState.network === 'auth-error') {
+        netDot.className = 'net-dot error';
+        netDot.title = netState.network === 'auth-error' ? 'Auth failed' : 'Server error';
+      } else {
+        netDot.className = 'net-dot off';
+        netDot.title = 'Server disconnected';
+      }
+      const total = netState.queueSize + (netState.screenshotQueue || 0);
+      queueEl.textContent = String(total);
+      queueEl.className = total > 0 ? 'stat-val active' : 'stat-val';
     }
   } catch (e) {}
 
+  // Page stats
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
@@ -90,17 +94,17 @@ async function updateStatus() {
         if (contentState.gazePointCount > 0) parts.push(`${contentState.gazePointCount} gaze`);
         if (contentState.mousePointCount > 0) parts.push(`${contentState.mousePointCount} mouse`);
         if (contentState.touchPointCount > 0) parts.push(`${contentState.touchPointCount} touch`);
-        if (contentState.firstViewedCount > 0) parts.push(`${contentState.firstViewedCount} first-viewed`);
         if (contentState.fixationCount > 0) parts.push(`${contentState.fixationCount} fixations`);
 
         const total = contentState.gazePointCount + contentState.mousePointCount + contentState.touchPointCount;
-        $('#page-stats').textContent = total > 0 ? parts.join(', ') : 'No data';
-        $('#page-stats').className = total > 0 ? 'status-value active' : 'status-value off';
+        const el = $('#page-stats');
+        el.textContent = total > 0 ? parts.join(' | ') : 'No page data';
+        el.className = total > 0 ? 'page-stats-text has-data' : 'page-stats-text';
       }
     }
   } catch (e) {
     $('#page-stats').textContent = 'N/A (system page)';
-    $('#page-stats').className = 'status-value off';
+    $('#page-stats').className = 'page-stats-text';
   }
 }
 
@@ -135,26 +139,21 @@ $('#btn-open-insights').addEventListener('click', async () => {
   window.close();
 });
 
-$('#btn-toggle-heatmap').addEventListener('click', async () => {
+/* ========== OVERLAY TOGGLES WITH ACTIVE STATE ========== */
+async function toggleOverlay(name, messageType) {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_HEATMAP' });
+    if (tab?.id) {
+      await chrome.tabs.sendMessage(tab.id, { type: messageType });
+      overlayStates[name] = !overlayStates[name];
+      $(`#btn-toggle-${name}`).dataset.active = String(overlayStates[name]);
+    }
   } catch (e) {}
-});
+}
 
-$('#btn-toggle-scanpath').addEventListener('click', async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SCANPATH' });
-  } catch (e) {}
-});
-
-$('#btn-toggle-cursor').addEventListener('click', async () => {
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) await chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_CURSOR' });
-  } catch (e) {}
-});
+$('#btn-toggle-heatmap').addEventListener('click', () => toggleOverlay('heatmap', 'TOGGLE_HEATMAP'));
+$('#btn-toggle-scanpath').addEventListener('click', () => toggleOverlay('scanpath', 'TOGGLE_SCANPATH'));
+$('#btn-toggle-cursor').addEventListener('click', () => toggleOverlay('cursor', 'TOGGLE_CURSOR'));
 
 debounceClick('#btn-start', async () => {
   try {
@@ -221,6 +220,7 @@ $('#btn-export').addEventListener('click', async () => {
 });
 
 $('#btn-clear').addEventListener('click', async () => {
+  if (!confirm('Clear all tracking data for this page?')) return;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (tab?.id) {
@@ -274,13 +274,13 @@ async function loadSessionInfo() {
 
     const container = $('#saved-sessions');
     if (info.savedSessions && info.savedSessions.length > 0) {
-      container.textContent = ''; // Clear safely
+      container.textContent = '';
       for (const s of info.savedSessions) {
         const item = document.createElement('div');
         item.className = 'saved-session-item';
         const nameSpan = document.createElement('span');
         nameSpan.className = 'session-name';
-        nameSpan.textContent = s.name; // Safe: textContent, not innerHTML
+        nameSpan.textContent = s.name;
         const metaSpan = document.createElement('span');
         metaSpan.className = 'session-meta';
         metaSpan.textContent = `${s.totalGaze} pts`;

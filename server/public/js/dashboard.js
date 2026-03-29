@@ -2,8 +2,8 @@
  * EyeD Dashboard — client-side logic.
  */
 
-const API_KEY = sessionStorage.getItem('eyed_dashboard_key') || '';
-const MASTER_KEY = sessionStorage.getItem('eyed_master_key') || '';
+let API_KEY = sessionStorage.getItem('eyed_dashboard_key') || '';
+let MASTER_KEY = sessionStorage.getItem('eyed_master_key') || '';
 
 function authHeaders() {
   const key = MASTER_KEY || API_KEY;
@@ -22,39 +22,105 @@ async function api(path, opts = {}) {
   return res;
 }
 
-// Prompt for key if not set
-if (!API_KEY && !MASTER_KEY) {
-  const key = prompt('Enter your EyeD API key or master key:');
-  if (key) {
-    if (key.startsWith('eyed_')) {
-      sessionStorage.setItem('eyed_dashboard_key', key);
-    } else {
-      sessionStorage.setItem('eyed_master_key', key);
+/* ========== TOAST SYSTEM ========== */
+function toast(message, type = 'info', duration = 4000) {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = message;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('fade-out');
+    setTimeout(() => el.remove(), 300);
+  }, duration);
+}
+
+/* ========== AUTH GATE ========== */
+const authGate = document.getElementById('auth-gate');
+const appEl = document.getElementById('app');
+
+function showApp() {
+  authGate.style.display = 'none';
+  appEl.style.display = '';
+  initApp();
+}
+
+if (API_KEY || MASTER_KEY) {
+  showApp();
+} else {
+  // Show auth gate
+  const authInput = document.getElementById('auth-key-input');
+  const authError = document.getElementById('auth-error');
+  document.getElementById('auth-submit').addEventListener('click', async () => {
+    const key = authInput.value.trim();
+    if (!key) { authError.textContent = 'Please enter a key.'; return; }
+    authError.textContent = '';
+    // Test the key
+    try {
+      const res = await fetch('/api/analytics/overview', {
+        headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      });
+      if (res.ok) {
+        if (key.startsWith('eyed_')) {
+          sessionStorage.setItem('eyed_dashboard_key', key);
+          API_KEY = key;
+        } else {
+          sessionStorage.setItem('eyed_master_key', key);
+          MASTER_KEY = key;
+        }
+        showApp();
+      } else if (res.status === 401 || res.status === 403) {
+        authError.textContent = 'Invalid key. Check your API key or master key.';
+      } else {
+        authError.textContent = `Server error (${res.status}). Is the server running?`;
+      }
+    } catch (err) {
+      authError.textContent = 'Cannot reach server. Check the URL.';
     }
-    location.reload();
-  }
+  });
+  authInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('auth-submit').click();
+  });
 }
 
 /* ========== TABS ========== */
-document.querySelectorAll('.tab').forEach(tab => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    tab.classList.add('active');
-    document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
-    // Load data for tab
-    switch (tab.dataset.tab) {
-      case 'overview': loadOverview(); break;
-      case 'sessions': loadSessions(); break;
-      case 'keys': loadKeys(); break;
-      case 'studies': loadStudies(); break;
-      case 'webhooks': loadWebhooks(); break;
-      case 'analytics': loadSessionList(); loadOverlaySessionList(); loadReplaySessionList(); break;
-      case 'tasks': loadTaskStudies(); break;
-      case 'forms': loadFormSessionList(); break;
-    }
+function initApp() {
+  // Main tabs
+  document.querySelectorAll('#main-tabs .tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('#main-tabs .tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(`tab-${tab.dataset.tab}`).classList.add('active');
+      switch (tab.dataset.tab) {
+        case 'overview': loadOverview(); break;
+        case 'sessions': loadSessions(); break;
+        case 'keys': loadKeys(); break;
+        case 'studies': loadStudies(); break;
+        case 'webhooks': loadWebhooks(); break;
+        case 'analytics': loadSessionList(); loadOverlaySessionList(); loadReplaySessionList(); break;
+        case 'tasks': loadTaskStudies(); break;
+        case 'forms': loadFormSessionList(); break;
+      }
+    });
   });
-});
+
+  // Analytics sub-tabs
+  document.querySelectorAll('#analytics-sub-tabs .sub-tab').forEach(st => {
+    st.addEventListener('click', () => {
+      document.querySelectorAll('#analytics-sub-tabs .sub-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('#tab-analytics .sub-content').forEach(c => c.classList.remove('active'));
+      st.classList.add('active');
+      document.getElementById(`sub-${st.dataset.sub}`).classList.add('active');
+    });
+  });
+
+  // Boot
+  loadOverview();
+  loadCohortStudies();
+  loadTaskStudies();
+  connectWs();
+}
 
 /* ========== WEBSOCKET ========== */
 let ws;
@@ -120,8 +186,6 @@ eventRateTimer = setInterval(() => {
   document.getElementById('live-rate').textContent = eventCounter;
   eventCounter = 0;
 }, 60000);
-
-connectWs();
 
 /* ========== OVERVIEW ========== */
 async function loadOverview() {
@@ -199,7 +263,7 @@ async function viewSession(id) {
   try {
     const res = await api(`/sessions/${id}/summary`);
     const { summary } = await res.json();
-    if (!summary) { alert('No data for this session'); return; }
+    if (!summary) { toast('No data for this session', 'error'); return; }
 
     const el = document.getElementById('analytics-result');
     renderSummary(summary, el);
@@ -210,7 +274,7 @@ async function viewSession(id) {
     document.querySelector('[data-tab="analytics"]').classList.add('active');
     document.getElementById('tab-analytics').classList.add('active');
   } catch (err) {
-    alert(err.message);
+    toast(err.message, 'error');
   }
 }
 
@@ -408,7 +472,7 @@ function renderTimeline(data, el) {
 /* ========== FUNNEL ========== */
 async function runFunnel() {
   const urls = document.getElementById('funnel-urls').value.split('\n').map(u => u.trim()).filter(Boolean);
-  if (urls.length < 2) { alert('Enter at least 2 URLs'); return; }
+  if (urls.length < 2) { toast('Enter at least 2 URLs', 'error'); return; }
   try {
     const res = await api('/analytics/funnel', { method: 'POST', body: JSON.stringify({ urls }) });
     const { funnel } = await res.json();
@@ -431,7 +495,7 @@ async function runFunnel() {
 async function runComparison() {
   const url1 = document.getElementById('compare-url1').value.trim();
   const url2 = document.getElementById('compare-url2').value.trim();
-  if (!url1 || !url2) { alert('Enter both URLs'); return; }
+  if (!url1 || !url2) { toast('Enter both URLs', 'error'); return; }
   try {
     const res = await api('/analytics/compare', { method: 'POST', body: JSON.stringify({ url1, url2 }) });
     const { comparison } = await res.json();
@@ -497,12 +561,12 @@ async function createStudy() {
   const name = document.getElementById('study-name').value.trim();
   const description = document.getElementById('study-desc').value.trim();
   const targetUrls = document.getElementById('study-urls').value.split('\n').filter(Boolean);
-  if (!name) { alert('Name required'); return; }
+  if (!name) { toast('Name required', 'error'); return; }
   try {
     await api('/studies', { method: 'POST', body: JSON.stringify({ name, description, targetUrls }) });
     closeModal();
     loadStudies();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function viewStudy(id) {
@@ -524,7 +588,7 @@ async function viewStudy(id) {
       `}
       <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
     `);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function exportStudy(id) {
@@ -584,7 +648,7 @@ async function createKey() {
   const name = document.getElementById('key-name').value.trim();
   const project = document.getElementById('key-project').value.trim();
   const scopes = document.getElementById('key-scopes').value;
-  if (!name) { alert('Name required'); return; }
+  if (!name) { toast('Name required', 'error'); return; }
   try {
     const res = await api('/keys', { method: 'POST', body: JSON.stringify({ name, project, scopes }) });
     const data = await res.json();
@@ -596,14 +660,14 @@ async function createKey() {
       </div>
     `;
     loadKeys();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function toggleKey(id, isActive) {
   try {
     await api(`/keys/${id}/${isActive ? 'deactivate' : 'activate'}`, { method: 'POST' });
     loadKeys();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ========== WEBHOOKS ========== */
@@ -653,21 +717,21 @@ function showCreateWebhook() {
 async function createWebhook() {
   const url = document.getElementById('webhook-url').value.trim();
   const events = [...document.querySelectorAll('#modal-content input[type=checkbox]:checked')].map(cb => cb.value);
-  if (!url) { alert('URL required'); return; }
+  if (!url) { toast('URL required', 'error'); return; }
   try {
     const res = await api('/webhooks', { method: 'POST', body: JSON.stringify({ url, events }) });
     const data = await res.json();
     closeModal();
-    alert(`Webhook created! Secret: ${data.secret}\nStore this for signature verification.`);
+    toast(`Webhook created! Secret: ${data.secret}`, 'success', 10000);
     loadWebhooks();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function toggleWebhook(id) {
   try {
     await api(`/webhooks/${id}/toggle`, { method: 'POST' });
     loadWebhooks();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function deleteWebhook(id) {
@@ -675,7 +739,7 @@ async function deleteWebhook(id) {
   try {
     await api(`/webhooks/${id}`, { method: 'DELETE' });
     loadWebhooks();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ========== MODAL ========== */
@@ -720,7 +784,7 @@ function fmtDuration(ms) {
 
 async function runUrlHeatmap() {
   const url = document.getElementById('url-heatmap-url').value.trim();
-  if (!url) { alert('Enter a URL'); return; }
+  if (!url) { toast('Enter a URL', 'error'); return; }
   const device = document.getElementById('url-heatmap-device').value;
   const el = document.getElementById('url-heatmap-result');
   el.innerHTML = '<div class="status-msg info">Loading...</div>';
@@ -768,8 +832,8 @@ async function runCohortHeatmap() {
   const cohortField = document.getElementById('cohort-field').value;
   const device = document.getElementById('cohort-device').value;
 
-  if (!url) { alert('Enter a URL'); return; }
-  if (!studyId) { alert('Select a study'); return; }
+  if (!url) { toast('Enter a URL', 'error'); return; }
+  if (!studyId) { toast('Select a study', 'error'); return; }
 
   const el = document.getElementById('cohort-result');
   el.innerHTML = '<div class="status-msg info">Analyzing cohorts...</div>';
@@ -866,7 +930,7 @@ async function runCohortHeatmap() {
 
 async function runViewportDist() {
   const url = document.getElementById('viewport-url').value.trim();
-  if (!url) { alert('Enter a URL'); return; }
+  if (!url) { toast('Enter a URL', 'error'); return; }
   const el = document.getElementById('viewport-result');
   el.innerHTML = '<div class="status-msg info">Analyzing...</div>';
   try {
@@ -1012,7 +1076,7 @@ async function showSessionDetail(id) {
 
       <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
     `);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function addTag(sessionId) {
@@ -1021,14 +1085,14 @@ async function addTag(sessionId) {
   try {
     await api(`/sessions/${sessionId}/tags`, { method: 'POST', body: JSON.stringify({ tag }) });
     showSessionDetail(sessionId);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function removeTag(sessionId, tag) {
   try {
     await api(`/sessions/${sessionId}/tags/${encodeURIComponent(tag)}`, { method: 'DELETE' });
     showSessionDetail(sessionId);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function addAnnotation(sessionId) {
@@ -1038,14 +1102,14 @@ async function addAnnotation(sessionId) {
   try {
     await api(`/sessions/${sessionId}/annotations`, { method: 'POST', body: JSON.stringify({ text, author }) });
     showSessionDetail(sessionId);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function deleteAnnotation(annotationId, sessionId) {
   try {
     await api(`/sessions/annotations/${annotationId}`, { method: 'DELETE' });
     showSessionDetail(sessionId);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ========== SCREENSHOT-HEATMAP OVERLAY ========== */
@@ -1084,7 +1148,7 @@ async function renderOverlay() {
   const screenshotId = screenshotSel.value;
   const el = document.getElementById('overlay-result');
 
-  if (!sessionId || !screenshotId) { alert('Select session and screenshot'); return; }
+  if (!sessionId || !screenshotId) { toast('Select session and screenshot', 'error'); return; }
 
   const opt = screenshotSel.selectedOptions[0];
   const imgW = parseInt(opt.dataset.width) || 960;
@@ -1133,11 +1197,11 @@ async function runTTFF() {
   const aoisInput = document.getElementById('ttff-aois').value.trim();
   const el = document.getElementById('ttff-result');
 
-  if (!sessionsInput || !aoisInput) { alert('Enter session IDs and AOIs'); return; }
+  if (!sessionsInput || !aoisInput) { toast('Enter session IDs and AOIs', 'error'); return; }
 
   let aois;
-  try { aois = JSON.parse(aoisInput); } catch { alert('Invalid AOI JSON'); return; }
-  if (!Array.isArray(aois)) { alert('AOIs must be a JSON array'); return; }
+  try { aois = JSON.parse(aoisInput); } catch { toast('Invalid AOI JSON', 'error'); return; }
+  if (!Array.isArray(aois)) { toast('AOIs must be a JSON array', 'error'); return; }
 
   const sessionIds = sessionsInput.split(',').map(s => s.trim()).filter(Boolean);
   el.innerHTML = '<div class="status-msg info">Analyzing...</div>';
@@ -1256,7 +1320,7 @@ async function loadTasks() {
 
 function showCreateTask() {
   const studyId = document.getElementById('task-study').value;
-  if (!studyId) { alert('Select a study first'); return; }
+  if (!studyId) { toast('Select a study first', 'error'); return; }
   showModal(`
     <h2>New Task</h2>
     <div class="form-group"><label>Name</label><input id="task-name" placeholder="Find the contact page"></div>
@@ -1274,7 +1338,7 @@ function showCreateTask() {
 
 async function createTask(studyId) {
   const name = document.getElementById('task-name').value.trim();
-  if (!name) { alert('Name required'); return; }
+  if (!name) { toast('Name required', 'error'); return; }
   try {
     await api('/tasks', {
       method: 'POST',
@@ -1290,7 +1354,7 @@ async function createTask(studyId) {
     });
     closeModal();
     loadTasks();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function deleteTask(id) {
@@ -1298,7 +1362,7 @@ async function deleteTask(id) {
   try {
     await api(`/tasks/${id}`, { method: 'DELETE' });
     loadTasks();
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 async function viewTaskInstances(taskId) {
@@ -1324,7 +1388,7 @@ async function viewTaskInstances(taskId) {
       `}
       <div class="modal-actions"><button class="btn" onclick="closeModal()">Close</button></div>
     `);
-  } catch (err) { alert(err.message); }
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ========== GAZE REPLAY ========== */
@@ -1366,7 +1430,7 @@ async function loadReplaySessionList() {
 async function startReplay() {
   stopReplay();
   const sessionId = document.getElementById('replay-session').value;
-  if (!sessionId) { alert('Select a session'); return; }
+  if (!sessionId) { toast('Select a session', 'error'); return; }
 
   const container = document.getElementById('replay-container');
   const progress = document.getElementById('replay-progress');
@@ -1510,7 +1574,7 @@ let aoiStart = null;
 function initAoiEditor() {
   const sessionId = document.getElementById('overlay-session').value;
   const screenshotId = document.getElementById('overlay-screenshot').value;
-  if (!screenshotId) { alert('Select a screenshot first to use as AOI background'); return; }
+  if (!screenshotId) { toast('Select a screenshot first for AOI background', 'error'); return; }
 
   const el = document.getElementById('overlay-result');
   el.innerHTML = `
@@ -1608,12 +1672,12 @@ function clearAois() {
 }
 
 function copyAoisToTTFF() {
-  if (aoiList.length === 0) { alert('No AOIs defined'); return; }
+  if (aoiList.length === 0) { toast('No AOIs defined', 'error'); return; }
   document.getElementById('ttff-aois').value = JSON.stringify(aoiList, null, 2);
   // Also set session
   const sid = document.getElementById('overlay-session').value;
   if (sid) document.getElementById('ttff-sessions').value = sid;
-  alert('AOIs copied to TTFF panel. Scroll down to run the analysis.');
+  toast('AOIs copied to TTFF panel. Switch to TTFF sub-tab to run analysis.', 'success');
 }
 
 /* ========== FORM ANALYTICS ========== */
@@ -1728,7 +1792,4 @@ async function loadFormAnalytics() {
   }
 }
 
-// Initial load
-loadOverview();
-loadCohortStudies();
-loadTaskStudies();
+// Initial load handled by initApp() after auth

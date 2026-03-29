@@ -7,300 +7,338 @@
   <link rel="stylesheet" href="/css/dashboard.css">
 </head>
 <body>
-  <div class="header">
-    <h1>EyeD Dashboard</h1>
-    <div style="display:flex;align-items:center;gap:12px">
-      <a href="/monitoring.html" style="color:var(--text-muted);font-size:13px;text-decoration:none">DevOps Monitor</a>
-      <span class="badge" id="ws-status">Connecting...</span>
+  <!-- Auth Gate -->
+  <div id="auth-gate" class="auth-gate">
+    <div class="auth-card">
+      <img src="/icons/icon48.png" alt="EyeD" onerror="this.style.display='none'">
+      <h1>EyeD Dashboard</h1>
+      <p>Enter your API key or master key to continue.</p>
+      <input type="password" id="auth-key-input" placeholder="eyed_... or master key" autocomplete="off">
+      <button class="btn primary full-width" id="auth-submit">Connect</button>
+      <div id="auth-error" class="auth-error"></div>
     </div>
   </div>
 
-  <div class="container">
-    <div class="tabs">
-      <div class="tab active" data-tab="overview">Overview</div>
-      <div class="tab" data-tab="sessions">Sessions</div>
-      <div class="tab" data-tab="analytics">Analytics</div>
-      <div class="tab" data-tab="studies">Studies</div>
-      <div class="tab" data-tab="keys">API Keys</div>
-      <div class="tab" data-tab="webhooks">Webhooks</div>
-      <div class="tab" data-tab="tasks">Tasks</div>
-      <div class="tab" data-tab="forms">Form Analytics</div>
-      <div class="tab" data-tab="live">Live Feed</div>
-    </div>
-
-    <!-- Overview Tab -->
-    <div class="tab-content active" id="tab-overview">
-      <div class="card-grid" id="overview-cards"></div>
-      <h3 style="margin-bottom:12px">Event Distribution</h3>
-      <div class="card" id="event-dist" style="margin-bottom:24px"></div>
-      <h3 style="margin-bottom:12px">Recent Sessions</h3>
-      <div class="table-wrap" id="recent-sessions"></div>
-    </div>
-
-    <!-- Sessions Tab -->
-    <div class="tab-content" id="tab-sessions">
-      <div class="card" style="padding:16px;margin-bottom:16px">
-        <h4 style="margin-bottom:12px">Filters</h4>
-        <div class="form-row">
-          <div class="form-group"><label>Status</label>
-            <select id="filter-status" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px;border-radius:6px;width:100%">
-              <option value="">All</option><option value="active">Active</option><option value="ended">Ended</option>
-            </select>
-          </div>
-          <div class="form-group"><label>Participant ID</label><input id="filter-participant" placeholder="Any"></div>
-          <div class="form-group"><label>Tag</label><input id="filter-tag" placeholder="Any"></div>
-          <div class="form-group"><label>Search Name</label><input id="filter-search" placeholder="Search..."></div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Study ID</label><input id="filter-study" type="number" placeholder="Any"></div>
-          <div class="form-group"><label>Min Duration (ms)</label><input id="filter-min-dur" type="number" placeholder="Any"></div>
-          <div class="form-group"><label>Max Duration (ms)</label><input id="filter-max-dur" type="number" placeholder="Any"></div>
-          <div class="form-group" style="display:flex;align-items:flex-end">
-            <button class="btn primary" onclick="loadFilteredSessions()">Apply Filters</button>
-          </div>
-        </div>
+  <!-- Main App (hidden until auth) -->
+  <div id="app" style="display:none">
+    <div class="header">
+      <h1>EyeD Dashboard</h1>
+      <div class="header-actions">
+        <a href="/monitoring.html" class="header-link">DevOps Monitor</a>
+        <span class="badge" id="ws-status">Connecting...</span>
       </div>
-      <div class="btn-row">
-        <button class="btn" onclick="loadSessions()">Reset &amp; Refresh</button>
-        <select id="session-format" style="background:var(--bg);color:var(--text);border:1px solid var(--border);padding:6px 10px;border-radius:6px">
-          <option value="json">Export JSON</option>
-          <option value="csv">Export CSV</option>
-        </select>
-        <button class="btn" onclick="exportSessions()">Export All</button>
-      </div>
-      <div class="table-wrap" id="sessions-table"></div>
     </div>
 
-    <!-- Analytics Tab -->
-    <div class="tab-content" id="tab-analytics">
-      <div class="form-row" style="margin-bottom:16px">
-        <div class="form-group">
-          <label>Session ID</label>
-          <select id="analytics-session" onchange="loadAnalytics()"></select>
+    <div class="container">
+      <div class="tabs" id="main-tabs">
+        <div class="tab active" data-tab="overview">Overview</div>
+        <div class="tab" data-tab="sessions">Sessions</div>
+        <div class="tab" data-tab="analytics">Analytics</div>
+        <div class="tab" data-tab="studies">Studies</div>
+        <div class="tab" data-tab="keys">API Keys</div>
+        <div class="tab" data-tab="webhooks">Webhooks</div>
+        <div class="tab" data-tab="tasks">Tasks</div>
+        <div class="tab" data-tab="forms">Forms</div>
+        <div class="tab" data-tab="live">Live</div>
+      </div>
+
+      <!-- Overview Tab -->
+      <div class="tab-content active" id="tab-overview">
+        <div class="card-grid" id="overview-cards">
+          <div class="card skeleton"><div class="skel-line w60"></div><div class="skel-block"></div></div>
+          <div class="card skeleton"><div class="skel-line w60"></div><div class="skel-block"></div></div>
+          <div class="card skeleton"><div class="skel-line w60"></div><div class="skel-block"></div></div>
+          <div class="card skeleton"><div class="skel-line w60"></div><div class="skel-block"></div></div>
         </div>
-        <div class="form-group">
-          <label>Analysis Type</label>
-          <select id="analytics-type" onchange="loadAnalytics()">
-            <option value="summary">Full Summary</option>
-            <option value="heatmap">Heatmap</option>
-            <option value="fixations">Fixations</option>
-            <option value="engagement">Engagement</option>
-            <option value="timeline">Timeline</option>
+        <h3 class="section-title">Event Distribution</h3>
+        <div class="card" id="event-dist"></div>
+        <h3 class="section-title">Recent Sessions</h3>
+        <div class="table-wrap" id="recent-sessions"></div>
+      </div>
+
+      <!-- Sessions Tab -->
+      <div class="tab-content" id="tab-sessions">
+        <div class="filter-panel">
+          <h4>Filters</h4>
+          <div class="form-row-4">
+            <div class="form-group"><label>Status</label>
+              <select id="filter-status"><option value="">All</option><option value="active">Active</option><option value="ended">Ended</option></select>
+            </div>
+            <div class="form-group"><label>Participant</label><input id="filter-participant" placeholder="Any"></div>
+            <div class="form-group"><label>Tag</label><input id="filter-tag" placeholder="Any"></div>
+            <div class="form-group"><label>Search</label><input id="filter-search" placeholder="Name..."></div>
+          </div>
+          <div class="form-row-4">
+            <div class="form-group"><label>Study ID</label><input id="filter-study" type="number" placeholder="Any"></div>
+            <div class="form-group"><label>Min Duration (ms)</label><input id="filter-min-dur" type="number" placeholder="Any"></div>
+            <div class="form-group"><label>Max Duration (ms)</label><input id="filter-max-dur" type="number" placeholder="Any"></div>
+            <div class="form-group form-group-end">
+              <button class="btn primary" onclick="loadFilteredSessions()">Apply</button>
+            </div>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn" onclick="loadSessions()">Reset</button>
+          <select id="session-format" class="inline-select">
+            <option value="json">JSON</option><option value="csv">CSV</option>
           </select>
+          <button class="btn" onclick="exportSessions()">Export</button>
+        </div>
+        <div class="table-wrap" id="sessions-table">
+          <div class="empty-state">No sessions loaded yet. Click Reset to load.</div>
         </div>
       </div>
-      <div id="analytics-result"></div>
 
-      <h3 style="margin:24px 0 12px">Funnel Analysis</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-group">
-          <label>URLs (one per line, in order)</label>
-          <textarea id="funnel-urls" rows="4" placeholder="/landing&#10;/pricing&#10;/signup&#10;/dashboard"></textarea>
+      <!-- Analytics Tab — with sub-navigation -->
+      <div class="tab-content" id="tab-analytics">
+        <div class="sub-tabs" id="analytics-sub-tabs">
+          <div class="sub-tab active" data-sub="session-analysis">Session</div>
+          <div class="sub-tab" data-sub="funnel-compare">Funnel &amp; Compare</div>
+          <div class="sub-tab" data-sub="heatmaps">Heatmaps</div>
+          <div class="sub-tab" data-sub="overlay-replay">Overlay &amp; Replay</div>
+          <div class="sub-tab" data-sub="ttff">TTFF</div>
         </div>
-        <button class="btn primary" onclick="runFunnel()">Analyze Funnel</button>
-        <div id="funnel-result" style="margin-top:16px"></div>
+
+        <!-- Sub: Session Analysis -->
+        <div class="sub-content active" id="sub-session-analysis">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Session</label>
+              <select id="analytics-session" onchange="loadAnalytics()"></select>
+            </div>
+            <div class="form-group">
+              <label>Analysis Type</label>
+              <select id="analytics-type" onchange="loadAnalytics()">
+                <option value="summary">Full Summary</option>
+                <option value="heatmap">Heatmap</option>
+                <option value="fixations">Fixations</option>
+                <option value="engagement">Engagement</option>
+                <option value="timeline">Timeline</option>
+              </select>
+            </div>
+          </div>
+          <div id="analytics-result">
+            <div class="empty-state">Select a session to begin analysis.</div>
+          </div>
+        </div>
+
+        <!-- Sub: Funnel & Compare -->
+        <div class="sub-content" id="sub-funnel-compare">
+          <h3 class="section-title">Funnel Analysis</h3>
+          <div class="card analysis-card">
+            <div class="form-group">
+              <label>URLs (one per line, in order)</label>
+              <textarea id="funnel-urls" rows="4" placeholder="/landing&#10;/pricing&#10;/signup&#10;/dashboard"></textarea>
+            </div>
+            <button class="btn primary" onclick="runFunnel()">Analyze Funnel</button>
+            <div id="funnel-result"></div>
+          </div>
+
+          <h3 class="section-title">Page Comparison</h3>
+          <div class="card analysis-card">
+            <div class="form-row">
+              <div class="form-group"><label>Page A URL</label><input id="compare-url1" placeholder="/page-a"></div>
+              <div class="form-group"><label>Page B URL</label><input id="compare-url2" placeholder="/page-b"></div>
+            </div>
+            <button class="btn primary" onclick="runComparison()">Compare</button>
+            <div id="compare-result"></div>
+          </div>
+        </div>
+
+        <!-- Sub: Heatmaps -->
+        <div class="sub-content" id="sub-heatmaps">
+          <h3 class="section-title">URL Heatmap Aggregation</h3>
+          <div class="card analysis-card">
+            <div class="form-row">
+              <div class="form-group" style="flex:2"><label>URL (partial match)</label><input id="url-heatmap-url" placeholder="/pricing"></div>
+              <div class="form-group">
+                <label>Device</label>
+                <select id="url-heatmap-device">
+                  <option value="all">All Devices</option>
+                  <option value="desktop">Desktop</option>
+                  <option value="tablet">Tablet</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn primary" onclick="runUrlHeatmap()">Generate</button>
+            <div id="url-heatmap-result"></div>
+          </div>
+
+          <h3 class="section-title">Cohort Heatmap Comparison</h3>
+          <div class="card analysis-card">
+            <div class="form-row">
+              <div class="form-group" style="flex:2"><label>URL</label><input id="cohort-url" placeholder="/landing"></div>
+              <div class="form-group"><label>Study</label><select id="cohort-study"></select></div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Cohort Field</label>
+                <select id="cohort-field">
+                  <option value="group">Group Name</option>
+                  <option value="gender">gender (metadata)</option>
+                  <option value="age_group">age_group (metadata)</option>
+                  <option value="experience">experience (metadata)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Device</label>
+                <select id="cohort-device">
+                  <option value="all">All Devices</option>
+                  <option value="desktop">Desktop</option>
+                  <option value="tablet">Tablet</option>
+                  <option value="mobile">Mobile</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn primary" onclick="runCohortHeatmap()">Compare Cohorts</button>
+            <div id="cohort-result"></div>
+          </div>
+
+          <h3 class="section-title">Viewport Distribution</h3>
+          <div class="card analysis-card">
+            <div class="form-group"><label>URL</label><input id="viewport-url" placeholder="/pricing"></div>
+            <button class="btn primary" onclick="runViewportDist()">Analyze</button>
+            <div id="viewport-result"></div>
+          </div>
+        </div>
+
+        <!-- Sub: Overlay & Replay -->
+        <div class="sub-content" id="sub-overlay-replay">
+          <h3 class="section-title">Screenshot-Heatmap Overlay</h3>
+          <div class="card analysis-card">
+            <div class="form-row">
+              <div class="form-group" style="flex:2"><label>Session</label>
+                <select id="overlay-session" onchange="loadOverlayScreenshots()"></select>
+              </div>
+              <div class="form-group"><label>Screenshot</label>
+                <select id="overlay-screenshot"></select>
+              </div>
+            </div>
+            <div class="btn-row">
+              <button class="btn primary" onclick="renderOverlay()">Generate Overlay</button>
+              <button class="btn" onclick="initAoiEditor()">Draw AOIs</button>
+            </div>
+            <div id="overlay-result"></div>
+          </div>
+
+          <h3 class="section-title">Gaze Replay</h3>
+          <div class="card analysis-card">
+            <div class="form-row">
+              <div class="form-group" style="flex:2"><label>Session</label>
+                <select id="replay-session" onchange="loadReplayScreenshots()"></select>
+              </div>
+              <div class="form-group"><label>Background</label>
+                <select id="replay-screenshot"><option value="">None</option></select>
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group"><label>Speed</label>
+                <select id="replay-speed">
+                  <option value="0.5">0.5x</option><option value="1" selected>1x</option>
+                  <option value="2">2x</option><option value="4">4x</option><option value="8">8x</option>
+                </select>
+              </div>
+              <div class="form-group form-group-end">
+                <button class="btn primary" id="replay-start-btn" onclick="startReplay()">Play</button>
+                <button class="btn" id="replay-pause-btn" onclick="toggleReplayPause()" style="display:none">Pause</button>
+                <button class="btn danger" id="replay-stop-btn" onclick="stopReplay()" style="display:none">Stop</button>
+              </div>
+            </div>
+            <div id="replay-container"></div>
+            <div id="replay-progress"></div>
+          </div>
+        </div>
+
+        <!-- Sub: TTFF -->
+        <div class="sub-content" id="sub-ttff">
+          <h3 class="section-title">Time to First Fixation (AOI)</h3>
+          <div class="card analysis-card">
+            <div class="form-group">
+              <label>Session IDs (comma-separated for aggregate)</label>
+              <input id="ttff-sessions" placeholder="session-id-1, session-id-2">
+            </div>
+            <div class="form-group">
+              <label>AOIs (JSON: [{name, x, y, width, height}] in 0-1 space)</label>
+              <textarea id="ttff-aois" rows="4" placeholder='[{"name":"Logo","x":0,"y":0,"width":0.15,"height":0.1},{"name":"CTA","x":0.3,"y":0.7,"width":0.4,"height":0.1}]'></textarea>
+            </div>
+            <button class="btn primary" onclick="runTTFF()">Analyze TTFF</button>
+            <div id="ttff-result"></div>
+          </div>
+        </div>
       </div>
 
-      <h3 style="margin:24px 0 12px">Page Comparison</h3>
-      <div class="card" style="padding:16px">
+      <!-- Studies Tab -->
+      <div class="tab-content" id="tab-studies">
+        <div class="btn-row">
+          <button class="btn primary" onclick="showCreateStudy()">New Study</button>
+          <button class="btn" onclick="loadStudies()">Refresh</button>
+        </div>
+        <div class="table-wrap" id="studies-table">
+          <div class="empty-state">No studies yet. Create one to get started.</div>
+        </div>
+      </div>
+
+      <!-- API Keys Tab -->
+      <div class="tab-content" id="tab-keys">
+        <div class="btn-row">
+          <button class="btn primary" onclick="showCreateKey()">Generate Key</button>
+          <button class="btn" onclick="loadKeys()">Refresh</button>
+        </div>
+        <div id="key-status"></div>
+        <div class="table-wrap" id="keys-table"></div>
+      </div>
+
+      <!-- Webhooks Tab -->
+      <div class="tab-content" id="tab-webhooks">
+        <div class="btn-row">
+          <button class="btn primary" onclick="showCreateWebhook()">Add Webhook</button>
+          <button class="btn" onclick="loadWebhooks()">Refresh</button>
+        </div>
+        <div class="table-wrap" id="webhooks-table"></div>
+      </div>
+
+      <!-- Tasks Tab -->
+      <div class="tab-content" id="tab-tasks">
         <div class="form-row">
-          <div class="form-group"><label>Page A URL</label><input id="compare-url1" placeholder="/page-a"></div>
-          <div class="form-group"><label>Page B URL</label><input id="compare-url2" placeholder="/page-b"></div>
+          <div class="form-group"><label>Study</label><select id="task-study" onchange="loadTasks()"></select></div>
+          <div class="form-group form-group-end">
+            <button class="btn primary" onclick="showCreateTask()">New Task</button>
+            <button class="btn" onclick="loadTasks()">Refresh</button>
+          </div>
         </div>
-        <button class="btn primary" onclick="runComparison()">Compare</button>
-        <div id="compare-result" style="margin-top:16px"></div>
+        <div class="table-wrap" id="tasks-table">
+          <div class="empty-state">Select a study to view tasks.</div>
+        </div>
+        <div id="task-summary"></div>
       </div>
 
-      <h3 style="margin:24px 0 12px">URL Heatmap Aggregation</h3>
-      <div class="card" style="padding:16px">
+      <!-- Form Analytics Tab -->
+      <div class="tab-content" id="tab-forms">
         <div class="form-row">
-          <div class="form-group" style="flex:2"><label>URL (partial match)</label><input id="url-heatmap-url" placeholder="/pricing"></div>
-          <div class="form-group">
-            <label>Device</label>
-            <select id="url-heatmap-device">
-              <option value="all">All Devices</option>
-              <option value="desktop">Desktop</option>
-              <option value="tablet">Tablet</option>
-              <option value="mobile">Mobile</option>
-            </select>
-          </div>
+          <div class="form-group" style="flex:2"><label>Session</label><select id="form-session" onchange="loadFormAnalytics()"></select></div>
+          <div class="form-group form-group-end"><button class="btn primary" onclick="loadFormAnalytics()">Analyze</button></div>
         </div>
-        <button class="btn primary" onclick="runUrlHeatmap()">Generate Heatmap</button>
-        <div id="url-heatmap-result" style="margin-top:16px"></div>
+        <div id="form-analytics-result">
+          <div class="empty-state">Select a session to analyze form interactions.</div>
+        </div>
       </div>
 
-      <h3 style="margin:24px 0 12px">Cohort Heatmap Comparison</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-row">
-          <div class="form-group" style="flex:2"><label>URL (partial match)</label><input id="cohort-url" placeholder="/landing"></div>
-          <div class="form-group">
-            <label>Study</label>
-            <select id="cohort-study"></select>
-          </div>
+      <!-- Live Feed Tab -->
+      <div class="tab-content" id="tab-live">
+        <div class="card-grid">
+          <div class="card"><div class="label">Live Clients</div><div class="value" id="live-clients">0</div></div>
+          <div class="card"><div class="label">Events/min</div><div class="value" id="live-rate">0</div></div>
         </div>
-        <div class="form-row">
-          <div class="form-group">
-            <label>Cohort Field</label>
-            <select id="cohort-field">
-              <option value="group">Group Name</option>
-              <option value="gender">gender (metadata)</option>
-              <option value="age_group">age_group (metadata)</option>
-              <option value="experience">experience (metadata)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Device</label>
-            <select id="cohort-device">
-              <option value="all">All Devices</option>
-              <option value="desktop">Desktop</option>
-              <option value="tablet">Tablet</option>
-              <option value="mobile">Mobile</option>
-            </select>
-          </div>
+        <div class="live-feed" id="live-feed">
+          <div class="empty-state">Waiting for events...</div>
         </div>
-        <button class="btn primary" onclick="runCohortHeatmap()">Compare Cohorts</button>
-        <div id="cohort-result" style="margin-top:16px"></div>
-      </div>
-
-      <h3 style="margin:24px 0 12px">Viewport Distribution</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-group"><label>URL (partial match)</label><input id="viewport-url" placeholder="/pricing"></div>
-        <button class="btn primary" onclick="runViewportDist()">Analyze</button>
-        <div id="viewport-result" style="margin-top:16px"></div>
-      </div>
-
-      <h3 style="margin:24px 0 12px">Screenshot-Heatmap Overlay</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-row">
-          <div class="form-group" style="flex:2"><label>Session</label>
-            <select id="overlay-session" onchange="loadOverlayScreenshots()"></select>
-          </div>
-          <div class="form-group"><label>Screenshot</label>
-            <select id="overlay-screenshot"></select>
-          </div>
-        </div>
-        <div style="display:flex;gap:8px">
-          <button class="btn primary" onclick="renderOverlay()">Generate Overlay</button>
-          <button class="btn" onclick="initAoiEditor()">Draw AOIs</button>
-        </div>
-        <div id="overlay-result" style="margin-top:16px;position:relative"></div>
-      </div>
-
-      <h3 style="margin:24px 0 12px">Gaze Replay</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-row">
-          <div class="form-group" style="flex:2"><label>Session</label>
-            <select id="replay-session" onchange="loadReplayScreenshots()"></select>
-          </div>
-          <div class="form-group"><label>Screenshot (optional background)</label>
-            <select id="replay-screenshot"><option value="">None (dark background)</option></select>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Playback Speed</label>
-            <select id="replay-speed">
-              <option value="0.5">0.5x</option>
-              <option value="1" selected>1x</option>
-              <option value="2">2x</option>
-              <option value="4">4x</option>
-              <option value="8">8x</option>
-            </select>
-          </div>
-          <div class="form-group" style="display:flex;align-items:flex-end;gap:8px">
-            <button class="btn primary" id="replay-start-btn" onclick="startReplay()">Load &amp; Play</button>
-            <button class="btn" id="replay-pause-btn" onclick="toggleReplayPause()" style="display:none">Pause</button>
-            <button class="btn danger" id="replay-stop-btn" onclick="stopReplay()" style="display:none">Stop</button>
-          </div>
-        </div>
-        <div id="replay-container" style="margin-top:16px;position:relative"></div>
-        <div id="replay-progress" style="margin-top:8px"></div>
-      </div>
-
-      <h3 style="margin:24px 0 12px">Time to First Fixation (AOI)</h3>
-      <div class="card" style="padding:16px">
-        <div class="form-row">
-          <div class="form-group" style="flex:2"><label>Session ID (or comma-separated IDs for aggregate)</label>
-            <input id="ttff-sessions" placeholder="session-id-1, session-id-2">
-          </div>
-        </div>
-        <div class="form-group">
-          <label>AOIs (JSON array: [{name, x, y, width, height}] in 0-1 space)</label>
-          <textarea id="ttff-aois" rows="4" placeholder='[{"name":"Logo","x":0,"y":0,"width":0.15,"height":0.1},{"name":"CTA Button","x":0.3,"y":0.7,"width":0.4,"height":0.1}]'></textarea>
-        </div>
-        <button class="btn primary" onclick="runTTFF()">Analyze TTFF</button>
-        <div id="ttff-result" style="margin-top:16px"></div>
-      </div>
-    </div>
-
-    <!-- Studies Tab -->
-    <div class="tab-content" id="tab-studies">
-      <div class="btn-row">
-        <button class="btn primary" onclick="showCreateStudy()">New Study</button>
-        <button class="btn" onclick="loadStudies()">Refresh</button>
-      </div>
-      <div class="table-wrap" id="studies-table"></div>
-    </div>
-
-    <!-- API Keys Tab -->
-    <div class="tab-content" id="tab-keys">
-      <div class="btn-row">
-        <button class="btn primary" onclick="showCreateKey()">Generate Key</button>
-        <button class="btn" onclick="loadKeys()">Refresh</button>
-      </div>
-      <div id="key-status"></div>
-      <div class="table-wrap" id="keys-table"></div>
-    </div>
-
-    <!-- Webhooks Tab -->
-    <div class="tab-content" id="tab-webhooks">
-      <div class="btn-row">
-        <button class="btn primary" onclick="showCreateWebhook()">Add Webhook</button>
-        <button class="btn" onclick="loadWebhooks()">Refresh</button>
-      </div>
-      <div class="table-wrap" id="webhooks-table"></div>
-    </div>
-
-    <!-- Tasks Tab -->
-    <div class="tab-content" id="tab-tasks">
-      <div class="form-row" style="margin-bottom:16px">
-        <div class="form-group">
-          <label>Study</label>
-          <select id="task-study" onchange="loadTasks()"></select>
-        </div>
-        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px">
-          <button class="btn primary" onclick="showCreateTask()">New Task</button>
-          <button class="btn" onclick="loadTasks()">Refresh</button>
-        </div>
-      </div>
-      <div class="table-wrap" id="tasks-table"></div>
-      <div id="task-summary" style="margin-top:16px"></div>
-    </div>
-
-    <!-- Form Analytics Tab -->
-    <div class="tab-content" id="tab-forms">
-      <div class="form-row" style="margin-bottom:16px">
-        <div class="form-group" style="flex:2">
-          <label>Session</label>
-          <select id="form-session" onchange="loadFormAnalytics()"></select>
-        </div>
-        <div class="form-group" style="display:flex;align-items:flex-end">
-          <button class="btn primary" onclick="loadFormAnalytics()">Analyze</button>
-        </div>
-      </div>
-      <div id="form-analytics-result"></div>
-    </div>
-
-    <!-- Live Feed Tab -->
-    <div class="tab-content" id="tab-live">
-      <div class="card-grid" style="margin-bottom:16px">
-        <div class="card"><div class="label">Live Clients</div><div class="value" id="live-clients">0</div></div>
-        <div class="card"><div class="label">Events/min</div><div class="value" id="live-rate">0</div></div>
-      </div>
-      <div class="live-feed" id="live-feed">
-        <div style="color:var(--text-muted);text-align:center;padding:40px">Waiting for events...</div>
       </div>
     </div>
   </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container" class="toast-container"></div>
 
   <!-- Modals -->
   <div class="modal-overlay" id="modal-overlay">
