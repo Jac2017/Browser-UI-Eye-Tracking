@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EyeD Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <img src="../icons/icon48.png" alt="EyeD">
+        <h1>EyeD Settings</h1>
+      </div>
+      <span class="version">v1.3</span>
+    </header>
+
+    <!-- API Endpoint -->
+    <section class="section">
+      <h2>Data Endpoint</h2>
+      <p>Configure where collected data is sent. HTTPS required. Leave empty to disable uploads.</p>
+      <div class="input-row">
+        <input type="url" id="api-endpoint" placeholder="https://your-server.com/api" autocomplete="off">
+        <button id="btn-test-endpoint" class="btn">Test</button>
+      </div>
+      <div id="endpoint-status" class="status-msg"></div>
+      <div class="input-row">
+        <input type="password" id="api-key" placeholder="API key (for auth + encryption)" autocomplete="off">
+        <button id="btn-toggle-key" class="btn" type="button">Show</button>
+      </div>
+      <p class="hint">API key is used for Bearer auth, AES-256-GCM payload encryption, and HMAC-SHA256 request signing.</p>
+      <label class="toggle-row">
+        <input type="checkbox" id="upload-enabled" checked>
+        <span>Enable automatic uploads</span>
+      </label>
+      <div class="input-row small">
+        <label for="batch-interval">Upload interval (seconds):</label>
+        <input type="number" id="batch-interval" min="10" max="300" value="30" step="5">
+      </div>
+    </section>
+
+    <!-- Collection Channels -->
+    <section class="section">
+      <h2>Data Collection</h2>
+      <p>Toggle which data channels are collected.</p>
+
+      <div class="toggle-group">
+        <h3>Core Tracking</h3>
+        <label class="toggle-row"><input type="checkbox" data-channel="gaze" checked><span>Gaze tracking</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="mouse" checked><span>Mouse movement</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="touch" checked><span>Touch events</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="scroll" checked><span>Scroll tracking</span></label>
+      </div>
+
+      <div class="toggle-group">
+        <h3>Interaction Events</h3>
+        <label class="toggle-row"><input type="checkbox" data-channel="clicks" checked><span>Click events (target, coords, element)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="hovers" checked><span>Hover dwell time per element</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="deadClicks" checked><span>Dead clicks (no resulting action)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="rageClicks" checked><span>Rage clicks (repeated frustrated clicks)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="formFocus" checked><span>Form field focus/blur (no content)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="textSelection" checked><span>Text selection events (no content)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="navigation" checked><span>Navigation events (back/forward/link)</span></label>
+      </div>
+
+      <div class="toggle-group">
+        <h3>Page Analytics</h3>
+        <label class="toggle-row"><input type="checkbox" data-channel="scrollDepth" checked><span>Scroll depth milestones (25/50/75/100%)</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="visibility" checked><span>Page visibility &amp; tab focus</span></label>
+        <label class="toggle-row"><input type="checkbox" data-channel="elementVisibility" checked><span>Element visibility (Intersection Observer)</span></label>
+      </div>
+
+      <div class="toggle-group">
+        <h3>Screenshots</h3>
+        <label class="toggle-row"><input type="checkbox" data-channel="autoScreenshots" checked><span>Auto-capture screenshots</span></label>
+        <div class="input-row small indent">
+          <label for="screenshot-interval">Capture interval (seconds):</label>
+          <input type="number" id="screenshot-interval" min="10" max="120" value="30" step="5">
+        </div>
+        <label class="toggle-row indent"><input type="checkbox" data-channel="screenshotOnLoad" checked><span>Capture on page load</span></label>
+        <label class="toggle-row indent"><input type="checkbox" data-channel="screenshotOnScroll" checked><span>Capture on scroll milestones</span></label>
+        <div class="input-row small indent">
+          <label for="screenshot-quality">JPEG quality (0-100):</label>
+          <input type="number" id="screenshot-quality" min="10" max="100" value="70" step="5">
+        </div>
+        <div class="input-row small indent">
+          <label for="screenshot-max-width">Max width (px):</label>
+          <input type="number" id="screenshot-max-width" min="320" max="3840" value="1280" step="160">
+        </div>
+      </div>
+    </section>
+
+    <!-- Privacy -->
+    <section class="section">
+      <h2>Privacy</h2>
+      <label class="toggle-row"><input type="checkbox" id="strip-query-params" checked><span>Strip URL query parameters before upload</span></label>
+      <label class="toggle-row"><input type="checkbox" id="strip-hash"><span>Strip URL hash/fragment</span></label>
+      <label class="toggle-row"><input type="checkbox" id="lite-mode"><span>Lite mode (coordinates + timestamps only, no DOM metadata)</span></label>
+
+      <h3>Domain Scope</h3>
+      <p>Restrict data collection to specific domains. One per line. Leave empty to collect on all sites.</p>
+      <div class="radio-row">
+        <label><input type="radio" name="scope-mode" value="all" checked> All domains</label>
+        <label><input type="radio" name="scope-mode" value="whitelist"> Whitelist only</label>
+        <label><input type="radio" name="scope-mode" value="blacklist"> Blacklist (exclude)</label>
+      </div>
+      <textarea id="domain-list" rows="4" placeholder="example.com&#10;app.example.com"></textarea>
+    </section>
+
+    <!-- Actions -->
+    <div class="btn-row">
+      <button id="btn-save" class="btn primary">Save Settings</button>
+      <button id="btn-reset-defaults" class="btn danger-outline">Reset to Defaults</button>
+    </div>
+    <div id="save-status" class="status-msg"></div>
+  </div>
+
+  <script src="settings.js"></script>
+</body>
+</html>
