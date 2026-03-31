@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EyeD Insights</title>
+  <link rel="stylesheet" href="insights.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <img src="../icons/icon48.png" alt="EyeD">
+        <h1>EyeD Insights</h1>
+      </div>
+      <div class="header-actions">
+        <select id="tab-selector">
+          <option value="">Select a tab...</option>
+        </select>
+        <button id="btn-refresh" class="btn">Refresh</button>
+      </div>
+    </header>
+
+    <!-- Engagement Score Card -->
+    <div id="engagement-card" class="card">
+      <div class="score-ring">
+        <svg viewBox="0 0 100 100">
+          <circle cx="50" cy="50" r="42" class="ring-bg"/>
+          <circle cx="50" cy="50" r="42" class="ring-fill" id="score-ring"/>
+        </svg>
+        <span id="score-value">--</span>
+      </div>
+      <div class="score-details">
+        <h2>Engagement Score</h2>
+        <div class="score-breakdown">
+          <div class="score-bar"><span class="bar-label">Stability</span><div class="bar"><div class="bar-fill" id="bar-stability"></div></div><span class="bar-val" id="val-stability">-</span></div>
+          <div class="score-bar"><span class="bar-label">Depth</span><div class="bar"><div class="bar-fill" id="bar-depth"></div></div><span class="bar-val" id="val-depth">-</span></div>
+          <div class="score-bar"><span class="bar-label">Breadth</span><div class="bar"><div class="bar-fill" id="bar-breadth"></div></div><span class="bar-val" id="val-breadth">-</span></div>
+          <div class="score-bar"><span class="bar-label">Revisits</span><div class="bar"><div class="bar-fill" id="bar-revisits"></div></div><span class="bar-val" id="val-revisits">-</span></div>
+          <div class="score-bar"><span class="bar-label">Pattern</span><div class="bar"><div class="bar-fill" id="bar-pattern"></div></div><span class="bar-val" id="val-pattern">-</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="scanpath">Scanpath</button>
+      <button class="tab" data-tab="aoi">AOI Analysis</button>
+      <button class="tab" data-tab="timeline">Timeline</button>
+      <button class="tab" data-tab="export">Export</button>
+    </nav>
+
+    <!-- Overview Tab -->
+    <div id="tab-overview" class="tab-panel active">
+      <div class="metrics-grid">
+        <div class="metric-card">
+          <span class="metric-value" id="m-fixations">0</span>
+          <span class="metric-label">Fixations</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-avg-duration">0ms</span>
+          <span class="metric-label">Avg Fixation</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-scan-pattern">-</span>
+          <span class="metric-label">Scan Pattern</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-gaze-points">0</span>
+          <span class="metric-label">Gaze Points</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-mouse-points">0</span>
+          <span class="metric-label">Mouse Points</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-touch-points">0</span>
+          <span class="metric-label">Touch Points</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-first-viewed">0</span>
+          <span class="metric-label">First Viewed</span>
+        </div>
+        <div class="metric-card">
+          <span class="metric-value" id="m-above-fold">0%</span>
+          <span class="metric-label">Above Fold</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>First Viewed Elements</h3>
+        <div id="first-viewed-list" class="item-list">
+          <p class="empty-state">No data yet</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>Fixation Duration Distribution</h3>
+        <canvas id="duration-chart" height="150"></canvas>
+      </div>
+    </div>
+
+    <!-- Scanpath Tab -->
+    <div id="tab-scanpath" class="tab-panel">
+      <div class="card">
+        <h3>Scanpath Visualization</h3>
+        <p class="hint">Numbered circles show fixation sequence. Size = dwell time. Lines = saccades.</p>
+        <canvas id="scanpath-canvas" height="400"></canvas>
+      </div>
+      <div class="card">
+        <h3>Fixation Table</h3>
+        <div class="table-wrap">
+          <table id="fixation-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Duration</th>
+                <th>Position</th>
+                <th>Time</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- AOI Tab -->
+    <div id="tab-aoi" class="tab-panel">
+      <div class="card">
+        <h3>Areas of Interest</h3>
+        <p class="hint">Auto-detected page regions ranked by total attention time.</p>
+        <div id="aoi-list" class="item-list">
+          <p class="empty-state">No AOI data</p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>AOI Attention Distribution</h3>
+        <canvas id="aoi-chart" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Timeline Tab -->
+    <div id="tab-timeline" class="tab-panel">
+      <div class="card">
+        <h3>Gaze Timeline</h3>
+        <p class="hint">Horizontal axis = time, vertical axis = Y position on page. Shows gaze movement over time.</p>
+        <canvas id="timeline-canvas" height="300"></canvas>
+      </div>
+      <div class="card" id="video-timeline-card" style="display:none;">
+        <h3>Video Attention Timeline</h3>
+        <p class="hint">Shows where user looked during video playback. Bars = attention on video.</p>
+        <canvas id="video-timeline-canvas" height="200"></canvas>
+        <div class="timeline-controls">
+          <label>Time range:
+            <input type="range" id="video-time-start" min="0" max="100" value="0">
+            <span id="video-time-label">0s - 0s</span>
+            <input type="range" id="video-time-end" min="0" max="100" value="100">
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Tab -->
+    <div id="tab-export" class="tab-panel">
+      <div class="card">
+        <h3>Export Options</h3>
+        <div class="export-grid">
+          <button id="btn-export-json" class="btn export-btn">
+            <span class="export-icon">{ }</span>
+            <span>Export JSON Report</span>
+            <span class="export-desc">Full data with analytics</span>
+          </button>
+          <button id="btn-export-csv" class="btn export-btn">
+            <span class="export-icon">CSV</span>
+            <span>Export CSV</span>
+            <span class="export-desc">Fixation data table</span>
+          </button>
+          <button id="btn-export-scanpath" class="btn export-btn">
+            <span class="export-icon">IMG</span>
+            <span>Export Scanpath PNG</span>
+            <span class="export-desc">Scanpath visualization</span>
+          </button>
+          <button id="btn-export-heatmap" class="btn export-btn">
+            <span class="export-icon">IMG</span>
+            <span>Export Heatmap PNG</span>
+            <span class="export-desc">Heatmap overlay image</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="insights.js"></script>
+</body>
+</html>
