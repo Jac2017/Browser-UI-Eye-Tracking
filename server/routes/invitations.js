@@ -419,4 +419,12 @@ router.post('/invitations/import-csv', masterAuth, (req, res) => {
   res.json({ added, skipped, invalid: invalid.slice(0, 10), totalLines: lines.length });
 });
 
+// GET /extension-package — download extension zip
+router.get('/extension-package', (req, res) => {
+  const zipPath = require('path').join(__dirname, '..', 'public', 'eyed-extension.zip');
+  res.download(zipPath, 'eyed-extension.zip', (err) => {
+    if (err) res.status(404).json({ error: 'Extension package not available. Contact your researcher.' });
+  });
+});
+
 module.exports = router;
