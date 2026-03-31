@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>EyeD - Eye Tracker</title>
   <link rel="stylesheet" href="tracker.css">
-  <!-- TensorFlow.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.15.0/dist/tf.min.js"></script>
-  <!-- MediaPipe Face Mesh -->
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <!-- TensorFlow.js (bundled locally for MV3 CSP compliance) -->
+  <script src="../lib/tf.min.js"></script>
+  <!-- MediaPipe Face Mesh (bundled locally for MV3 CSP compliance) -->
+  <script src="../lib/face_mesh.js"></script>
+  <script src="../lib/camera_utils.js"></script>
+  <script src="../lib/drawing_utils.js"></script>
 </head>
 <body>
   <!-- Privacy Consent Overlay (shown before webcam access) -->
