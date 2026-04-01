@@ -5,18 +5,21 @@
   <title>EyeD FaceMesh Sandbox</title>
 </head>
 <body>
+  <canvas id="frame-canvas" style="display:none;"></canvas>
   <script src="../lib/face_mesh.js"></script>
   <script>
     let faceMesh = null;
     let ready = false;
+    let processing = false;
+    const canvas = document.getElementById('frame-canvas');
+    const ctx = canvas.getContext('2d');
+    let frameCount = 0;
+    let faceCount = 0;
 
     function init() {
       try {
         faceMesh = new FaceMesh({
-          locateFile: (file) => {
-            // Sandbox pages can't use chrome.runtime.getURL, so we use relative paths
-            return '../lib/' + file;
-          }
+          locateFile: (file) => '../lib/' + file
         });
 
         faceMesh.setOptions({
@@ -30,14 +33,14 @@
           const landmarks = (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0)
             ? results.multiFaceLandmarks[0]
             : null;
-          // Send landmarks back to parent
+          if (landmarks) faceCount++;
           window.parent.postMessage({ type: 'facemesh-results', landmarks: landmarks }, '*');
         });
 
         faceMesh.initialize().then(() => {
           ready = true;
           window.parent.postMessage({ type: 'facemesh-ready' }, '*');
-          console.log('[Sandbox] FaceMesh initialized');
+          console.log('[Sandbox] FaceMesh initialized OK');
         }).catch((err) => {
           window.parent.postMessage({ type: 'facemesh-error', error: err.message }, '*');
           console.error('[Sandbox] FaceMesh init error:', err);
@@ -48,23 +51,37 @@
       }
     }
 
-    // Listen for video frames from parent
     window.addEventListener('message', async (event) => {
-      if (event.data && event.data.type === 'process-frame' && ready && faceMesh) {
+      if (!event.data || !event.data.type) return;
+
+      if (event.data.type === 'process-frame' && ready && faceMesh && !processing) {
+        processing = true;
         try {
-          // Receive ImageBitmap and send to FaceMesh
-          const bitmap = event.data.bitmap;
-          // Create a canvas to draw the bitmap
-          const canvas = document.createElement('canvas');
-          canvas.width = bitmap.width;
-          canvas.height = bitmap.height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(bitmap, 0, 0);
-          bitmap.close();
+          const d = event.data;
+          // Resize canvas if needed
+          if (canvas.width !== d.width || canvas.height !== d.height) {
+            canvas.width = d.width;
+            canvas.height = d.height;
+          }
+          // Draw ImageData onto canvas
+          const imageData = new ImageData(new Uint8ClampedArray(d.pixels), d.width, d.height);
+          ctx.putImageData(imageData, 0, 0);
+          frameCount++;
           await faceMesh.send({ image: canvas });
         } catch (e) {
           console.warn('[Sandbox] Frame error:', e);
+          window.parent.postMessage({ type: 'facemesh-results', landmarks: null }, '*');
         }
+        processing = false;
+      }
+
+      if (event.data.type === 'ping') {
+        window.parent.postMessage({
+          type: 'pong',
+          ready: ready,
+          frames: frameCount,
+          faces: faceCount
+        }, '*');
       }
     });
 

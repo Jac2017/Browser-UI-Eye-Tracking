@@ -94,16 +94,35 @@ function initFaceMesh() {
   });
 }
 
+// Offscreen canvas for extracting video frame pixels
+let _frameCanvas = null;
+let _frameCtx = null;
+
 function sendFrameToSandbox() {
   if (!sandboxIframe || !faceMeshReady) return Promise.resolve();
-  // Capture current video frame as ImageBitmap and send to sandbox
-  return createImageBitmap(webcamEl).then((bitmap) => {
+  try {
+    const w = webcamEl.videoWidth || 640;
+    const h = webcamEl.videoHeight || 480;
+    if (!_frameCanvas) {
+      _frameCanvas = document.createElement('canvas');
+      _frameCtx = _frameCanvas.getContext('2d');
+    }
+    if (_frameCanvas.width !== w || _frameCanvas.height !== h) {
+      _frameCanvas.width = w;
+      _frameCanvas.height = h;
+    }
+    _frameCtx.drawImage(webcamEl, 0, 0, w, h);
+    const imageData = _frameCtx.getImageData(0, 0, w, h);
+    const buffer = imageData.data.buffer;
     sandboxIframe.contentWindow.postMessage(
-      { type: 'process-frame', bitmap: bitmap },
+      { type: 'process-frame', pixels: buffer, width: w, height: h },
       '*',
-      [bitmap] // transfer ownership
+      [buffer]
     );
-  });
+  } catch (e) {
+    console.warn('[EyeD] sendFrameToSandbox error:', e);
+  }
+  return Promise.resolve();
 }
 
 function onFaceMeshResults(landmarks) {
