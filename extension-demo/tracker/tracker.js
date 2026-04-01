@@ -58,6 +58,7 @@ function setStatusText(text) {
 /* ========== MEDIAPIPE FACE MESH (via sandbox iframe) ========== */
 let faceMeshReady = false;
 let sandboxIframe = null;
+let sandboxPort = null; // MessagePort for sandbox communication
 
 function initFaceMesh() {
   return new Promise((resolve, reject) => {
@@ -74,55 +75,62 @@ function initFaceMesh() {
 
     console.log('[EyeD] Waiting for sandbox FaceMesh to initialize...');
 
-    // Listen for messages from sandbox
-    window.addEventListener('message', function onMsg(event) {
-      if (!event.data || !event.data.type) return;
+    // Create a MessageChannel for reliable sandbox communication.
+    // Chrome manifest-sandboxed pages have a unique origin,
+    // so event.source / window.parent may not work.
+    const channel = new MessageChannel();
+    sandboxPort = channel.port1;
 
-      if (event.data.type === 'facemesh-ready') {
+    // Listen for messages from sandbox via the port
+    sandboxPort.onmessage = (event) => {
+      const data = event.data;
+      if (!data || !data.type) return;
+
+      if (data.type === 'facemesh-ready') {
         clearTimeout(timeout);
         if (!faceMeshReady) {
           faceMeshReady = true;
           console.log('[EyeD] Sandbox FaceMesh initialized successfully');
           resolve();
         }
-      } else if (event.data.type === 'facemesh-loading') {
-        // Sandbox received our ping but isn't ready yet — keep waiting
+      } else if (data.type === 'facemesh-loading') {
         console.log('[EyeD] Sandbox still loading...');
-      } else if (event.data.type === 'facemesh-error') {
+      } else if (data.type === 'facemesh-error') {
         clearTimeout(timeout);
-        console.error('[EyeD] Sandbox FaceMesh error:', event.data.error);
-        reject(new Error(event.data.error));
-      } else if (event.data.type === 'facemesh-results') {
+        console.error('[EyeD] Sandbox FaceMesh error:', data.error);
+        reject(new Error(data.error));
+      } else if (data.type === 'facemesh-results') {
         _debugStats.resultsReceived++;
-        if (event.data.landmarks) _debugStats.facesDetected++;
-        onFaceMeshResults(event.data.landmarks);
-      } else if (event.data.type === 'pong') {
-        console.log('[EyeD] Sandbox pong:', event.data);
+        if (data.landmarks) _debugStats.facesDetected++;
+        onFaceMeshResults(data.landmarks);
       }
-    });
+    };
 
-    // Send init message to sandbox so it captures our window reference.
-    // Manifest-sandboxed pages can't use window.parent.postMessage —
-    // they must reply via event.source from a received message.
-    // Poll every second in case sandbox hasn't loaded yet.
-    function pingsandbox() {
-      if (faceMeshReady) return;
+    // Send port2 to the sandbox iframe once it loads
+    function sendPort() {
       try {
-        sandboxIframe.contentWindow.postMessage({ type: 'init' }, '*');
+        sandboxIframe.contentWindow.postMessage(
+          { type: 'init-port' }, '*', [channel.port2]
+        );
+        console.log('[EyeD] Sent MessagePort to sandbox');
       } catch (e) {
-        console.warn('[EyeD] Could not ping sandbox:', e);
+        console.warn('[EyeD] Could not send port to sandbox:', e);
       }
-      setTimeout(pingsandbox, 1000);
     }
 
-    // Wait for iframe to load, then start pinging
     sandboxIframe.addEventListener('load', () => {
-      console.log('[EyeD] Sandbox iframe loaded, sending init...');
-      pingsandbox();
+      console.log('[EyeD] Sandbox iframe loaded');
+      sendPort();
+      // Ping periodically in case sandbox wasn't ready for the port
+      const pingInterval = setInterval(() => {
+        if (faceMeshReady) { clearInterval(pingInterval); return; }
+        sendPort();
+      }, 2000);
     });
+
     // Also try immediately in case iframe already loaded
     if (sandboxIframe.contentWindow) {
-      setTimeout(pingsandbox, 500);
+      setTimeout(sendPort, 500);
     }
   });
 }
@@ -135,7 +143,7 @@ let _frameCanvas = null;
 let _frameCtx = null;
 
 function sendFrameToSandbox() {
-  if (!sandboxIframe || !faceMeshReady) return Promise.resolve();
+  if (!sandboxPort || !faceMeshReady) return Promise.resolve();
   try {
     const w = webcamEl.videoWidth || 640;
     const h = webcamEl.videoHeight || 480;
@@ -150,9 +158,8 @@ function sendFrameToSandbox() {
     _frameCtx.drawImage(webcamEl, 0, 0, w, h);
     const imageData = _frameCtx.getImageData(0, 0, w, h);
     const buffer = imageData.data.buffer;
-    sandboxIframe.contentWindow.postMessage(
+    sandboxPort.postMessage(
       { type: 'process-frame', pixels: buffer, width: w, height: h },
-      '*',
       [buffer]
     );
     _debugStats.framesSent++;

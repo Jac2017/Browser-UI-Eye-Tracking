@@ -6,14 +6,12 @@ const ctx = canvas.getContext('2d');
 let frameCount = 0;
 let faceCount = 0;
 
-// Store reference to parent window - must come from event.source
-// (manifest-sandboxed pages cannot use window.parent.postMessage)
-let parentSource = null;
-let parentOrigin = '*';
+// MessagePort for communicating with parent (received via first message)
+let parentPort = null;
 
 function sendToParent(msg) {
-  if (parentSource) {
-    parentSource.postMessage(msg, parentOrigin);
+  if (parentPort) {
+    parentPort.postMessage(msg);
   }
 }
 
@@ -41,7 +39,6 @@ function init() {
     faceMesh.initialize().then(() => {
       ready = true;
       console.log('[Sandbox] FaceMesh initialized OK');
-      // If parent already connected, notify immediately
       sendToParent({ type: 'facemesh-ready' });
     }).catch((err) => {
       console.error('[Sandbox] FaceMesh init error:', err);
@@ -53,44 +50,50 @@ function init() {
   }
 }
 
-window.addEventListener('message', async (event) => {
-  if (!event.data || !event.data.type) return;
+// Listen for the MessagePort from parent (sent via postMessage transfer)
+window.addEventListener('message', (event) => {
+  if (event.ports && event.ports.length > 0 && !parentPort) {
+    parentPort = event.ports[0];
+    console.log('[Sandbox] Received MessagePort from parent');
 
-  // Capture parent reference from first message
-  if (!parentSource && event.source) {
-    parentSource = event.source;
-    parentOrigin = event.origin || '*';
-    console.log('[Sandbox] Parent connected, origin:', parentOrigin);
-  }
+    // Set up message handler on the port
+    parentPort.onmessage = async (portEvent) => {
+      const data = portEvent.data;
+      if (!data || !data.type) return;
 
-  if (event.data.type === 'init' || event.data.type === 'ping') {
-    // Parent is asking for status — reply with current state
-    sendToParent({
-      type: ready ? 'facemesh-ready' : 'facemesh-loading',
-      ready: ready,
-      frames: frameCount,
-      faces: faceCount
-    });
-    return;
-  }
-
-  if (event.data.type === 'process-frame' && ready && faceMesh && !processing) {
-    processing = true;
-    try {
-      const d = event.data;
-      if (canvas.width !== d.width || canvas.height !== d.height) {
-        canvas.width = d.width;
-        canvas.height = d.height;
+      if (data.type === 'ping') {
+        sendToParent({
+          type: ready ? 'facemesh-ready' : 'facemesh-loading',
+          ready: ready,
+          frames: frameCount,
+          faces: faceCount
+        });
+        return;
       }
-      const imageData = new ImageData(new Uint8ClampedArray(d.pixels), d.width, d.height);
-      ctx.putImageData(imageData, 0, 0);
-      frameCount++;
-      await faceMesh.send({ image: canvas });
-    } catch (e) {
-      console.warn('[Sandbox] Frame error:', e);
-      sendToParent({ type: 'facemesh-results', landmarks: null });
+
+      if (data.type === 'process-frame' && ready && faceMesh && !processing) {
+        processing = true;
+        try {
+          if (canvas.width !== data.width || canvas.height !== data.height) {
+            canvas.width = data.width;
+            canvas.height = data.height;
+          }
+          const imageData = new ImageData(new Uint8ClampedArray(data.pixels), data.width, data.height);
+          ctx.putImageData(imageData, 0, 0);
+          frameCount++;
+          await faceMesh.send({ image: canvas });
+        } catch (e) {
+          console.warn('[Sandbox] Frame error:', e);
+          sendToParent({ type: 'facemesh-results', landmarks: null });
+        }
+        processing = false;
+      }
+    };
+
+    // If already ready when port arrives, notify parent immediately
+    if (ready) {
+      sendToParent({ type: 'facemesh-ready' });
     }
-    processing = false;
   }
 });
 
