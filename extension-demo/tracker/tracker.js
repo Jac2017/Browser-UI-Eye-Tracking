@@ -55,58 +55,61 @@ function setStatusText(text) {
   $('#status-text').textContent = text;
 }
 
-/* ========== MEDIAPIPE FACE MESH ========== */
-let faceMesh = null;
+/* ========== MEDIAPIPE FACE MESH (via sandbox iframe) ========== */
 let faceMeshReady = false;
+let sandboxIframe = null;
 
 function initFaceMesh() {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
-      reject(new Error('FaceMesh load timed out. Check your internet connection.'));
+      reject(new Error('FaceMesh load timed out (30s). Sandbox may have failed.'));
     }, FACEMESH_LOAD_TIMEOUT_MS);
 
-    try {
-      const locateFn = (file) => {
-        const url = chrome.runtime.getURL(`lib/${file}`);
-        console.log('[EyeD] locateFile:', file, '->', url);
-        return url;
-      };
+    sandboxIframe = document.getElementById('facemesh-sandbox');
+    if (!sandboxIframe) {
+      clearTimeout(timeout);
+      reject(new Error('Sandbox iframe not found'));
+      return;
+    }
 
-      faceMesh = new FaceMesh({ locateFile: locateFn });
+    console.log('[EyeD] Waiting for sandbox FaceMesh to initialize...');
 
-      faceMesh.setOptions({
-        maxNumFaces: 1,
-        refineLandmarks: true,
-        minDetectionConfidence: 0.5,
-        minTrackingConfidence: 0.5,
-      });
+    // Listen for messages from sandbox
+    window.addEventListener('message', function onMsg(event) {
+      if (!event.data || !event.data.type) return;
 
-      faceMesh.onResults(onFaceMeshResults);
-
-      console.log('[EyeD] Calling faceMesh.initialize()...');
-      faceMesh.initialize().then(() => {
+      if (event.data.type === 'facemesh-ready') {
         clearTimeout(timeout);
         faceMeshReady = true;
-        console.log('[EyeD] FaceMesh initialized successfully');
+        console.log('[EyeD] Sandbox FaceMesh initialized successfully');
         resolve();
-      }).catch((err) => {
+      } else if (event.data.type === 'facemesh-error') {
         clearTimeout(timeout);
-        console.error('[EyeD] FaceMesh initialize() rejected:', err);
-        reject(err);
-      });
-    } catch (err) {
-      clearTimeout(timeout);
-      console.error('[EyeD] FaceMesh constructor error:', err);
-      reject(err);
-    }
+        console.error('[EyeD] Sandbox FaceMesh error:', event.data.error);
+        reject(new Error(event.data.error));
+      } else if (event.data.type === 'facemesh-results') {
+        onFaceMeshResults(event.data.landmarks);
+      }
+    });
   });
 }
 
-function onFaceMeshResults(results) {
+function sendFrameToSandbox() {
+  if (!sandboxIframe || !faceMeshReady) return Promise.resolve();
+  // Capture current video frame as ImageBitmap and send to sandbox
+  return createImageBitmap(webcamEl).then((bitmap) => {
+    sandboxIframe.contentWindow.postMessage(
+      { type: 'process-frame', bitmap: bitmap },
+      '*',
+      [bitmap] // transfer ownership
+    );
+  });
+}
+
+function onFaceMeshResults(landmarks) {
   overlayCtx.clearRect(0, 0, overlayEl.width, overlayEl.height);
 
-  if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-    const landmarks = results.multiFaceLandmarks[0];
+  if (landmarks && landmarks.length > 0) {
     state.currentPosition = landmarks;
     state.faceDetected = true;
     setStatus('face', 'on');
@@ -227,29 +230,15 @@ async function initWebcam() {
 
 function startProcessingLoop() {
   let processing = false;
-  let frameCount = 0;
-  let faceCount = 0;
-  let errorCount = 0;
-  let lastDiag = 0;
   async function processFrame() {
     if (state.webcamReady && faceMeshReady && !processing && webcamEl.readyState >= 2) {
       processing = true;
-      frameCount++;
       try {
-        await faceMesh.send({ image: webcamEl });
-        if (state.faceDetected) faceCount++;
+        await sendFrameToSandbox();
       } catch (e) {
-        errorCount++;
-        if (errorCount <= 3) console.warn('FaceMesh frame error:', e);
+        console.warn('FaceMesh frame error:', e);
       }
       processing = false;
-    }
-    const now = Date.now();
-    if (now - lastDiag > 3000) {
-      lastDiag = now;
-      const d = document.getElementById('eyed-diag');
-      if (d && frameCount > 0) d.textContent += `Frames: ${frameCount}, faces: ${faceCount}, errors: ${errorCount}, readyState: ${webcamEl.readyState}\n`;
-      if (d && frameCount === 0) d.textContent += `No frames sent. webcamReady=${state.webcamReady} faceMeshReady=${faceMeshReady} readyState=${webcamEl.readyState}\n`;
     }
     requestAnimationFrame(processFrame);
   }
@@ -1156,25 +1145,12 @@ async function proceedAfterConsent() {
 }
 
 async function startApp() {
-  const diag = document.createElement('div');
-  diag.id = 'eyed-diag';
-  diag.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font:11px monospace;padding:8px;z-index:99999;max-height:200px;overflow-y:auto;';
-  document.body.appendChild(diag);
-  function dlog(msg) { console.log('[EyeD]', msg); diag.textContent += msg + '\n'; diag.scrollTop = diag.scrollHeight; }
-
-  dlog('Starting app...');
-  dlog('FaceMesh class exists: ' + (typeof FaceMesh));
-  dlog('tf exists: ' + (typeof tf));
-
   setStatusText('Loading face mesh model...');
 
   try {
-    dlog('Calling initFaceMesh()...');
     await initFaceMesh();
-    dlog('FaceMesh initialized OK, faceMeshReady=' + faceMeshReady);
     setStatusText('Face mesh loaded');
   } catch (err) {
-    dlog('FaceMesh FAILED: ' + err.message);
     console.error('FaceMesh init failed:', err);
     setStatus('face', 'error');
     setStatusText('Face mesh failed to load — ' + err.message);
@@ -1188,10 +1164,7 @@ async function startApp() {
     // No saved model — expected on first run
   }
 
-  dlog('Starting webcam...');
   await initWebcam();
-  dlog('Webcam ready=' + state.webcamReady + ', faceMeshReady=' + faceMeshReady);
-  dlog('Will process frames: ' + (state.webcamReady && faceMeshReady));
 }
 
 async function init() {
