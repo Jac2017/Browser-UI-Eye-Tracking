@@ -35,7 +35,7 @@ const state = {
 const EYE_CANVAS_W = 55;
 const EYE_CANVAS_H = 25;
 const TRAIN_SPLIT = 0.8;
-const FACEMESH_LOAD_TIMEOUT_MS = 15000;
+const FACEMESH_LOAD_TIMEOUT_MS = 30000;
 
 /* ========== DOM REFS ========== */
 const $ = (sel) => document.querySelector(sel);
@@ -66,9 +66,13 @@ function initFaceMesh() {
     }, FACEMESH_LOAD_TIMEOUT_MS);
 
     try {
-      faceMesh = new FaceMesh({
-        locateFile: (file) => chrome.runtime.getURL(`lib/${file}`)
-      });
+      const locateFn = (file) => {
+        const url = chrome.runtime.getURL(`lib/${file}`);
+        console.log('[EyeD] locateFile:', file, '->', url);
+        return url;
+      };
+
+      faceMesh = new FaceMesh({ locateFile: locateFn });
 
       faceMesh.setOptions({
         maxNumFaces: 1,
@@ -79,17 +83,20 @@ function initFaceMesh() {
 
       faceMesh.onResults(onFaceMeshResults);
 
-      // FaceMesh initializes on first send(); we resolve on first result
+      console.log('[EyeD] Calling faceMesh.initialize()...');
       faceMesh.initialize().then(() => {
         clearTimeout(timeout);
         faceMeshReady = true;
+        console.log('[EyeD] FaceMesh initialized successfully');
         resolve();
       }).catch((err) => {
         clearTimeout(timeout);
+        console.error('[EyeD] FaceMesh initialize() rejected:', err);
         reject(err);
       });
     } catch (err) {
       clearTimeout(timeout);
+      console.error('[EyeD] FaceMesh constructor error:', err);
       reject(err);
     }
   });
