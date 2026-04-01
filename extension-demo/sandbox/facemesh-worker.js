@@ -6,6 +6,17 @@ const ctx = canvas.getContext('2d');
 let frameCount = 0;
 let faceCount = 0;
 
+// Store reference to parent window - must come from event.source
+// (manifest-sandboxed pages cannot use window.parent.postMessage)
+let parentSource = null;
+let parentOrigin = '*';
+
+function sendToParent(msg) {
+  if (parentSource) {
+    parentSource.postMessage(msg, parentOrigin);
+  }
+}
+
 function init() {
   try {
     faceMesh = new FaceMesh({
@@ -24,25 +35,44 @@ function init() {
         ? results.multiFaceLandmarks[0]
         : null;
       if (landmarks) faceCount++;
-      window.parent.postMessage({ type: 'facemesh-results', landmarks: landmarks }, '*');
+      sendToParent({ type: 'facemesh-results', landmarks: landmarks });
     });
 
     faceMesh.initialize().then(() => {
       ready = true;
-      window.parent.postMessage({ type: 'facemesh-ready' }, '*');
       console.log('[Sandbox] FaceMesh initialized OK');
+      // If parent already connected, notify immediately
+      sendToParent({ type: 'facemesh-ready' });
     }).catch((err) => {
-      window.parent.postMessage({ type: 'facemesh-error', error: err.message }, '*');
       console.error('[Sandbox] FaceMesh init error:', err);
+      sendToParent({ type: 'facemesh-error', error: err.message });
     });
   } catch (err) {
-    window.parent.postMessage({ type: 'facemesh-error', error: err.message }, '*');
     console.error('[Sandbox] FaceMesh constructor error:', err);
+    sendToParent({ type: 'facemesh-error', error: err.message });
   }
 }
 
 window.addEventListener('message', async (event) => {
   if (!event.data || !event.data.type) return;
+
+  // Capture parent reference from first message
+  if (!parentSource && event.source) {
+    parentSource = event.source;
+    parentOrigin = event.origin || '*';
+    console.log('[Sandbox] Parent connected, origin:', parentOrigin);
+  }
+
+  if (event.data.type === 'init' || event.data.type === 'ping') {
+    // Parent is asking for status — reply with current state
+    sendToParent({
+      type: ready ? 'facemesh-ready' : 'facemesh-loading',
+      ready: ready,
+      frames: frameCount,
+      faces: faceCount
+    });
+    return;
+  }
 
   if (event.data.type === 'process-frame' && ready && faceMesh && !processing) {
     processing = true;
@@ -58,18 +88,9 @@ window.addEventListener('message', async (event) => {
       await faceMesh.send({ image: canvas });
     } catch (e) {
       console.warn('[Sandbox] Frame error:', e);
-      window.parent.postMessage({ type: 'facemesh-results', landmarks: null }, '*');
+      sendToParent({ type: 'facemesh-results', landmarks: null });
     }
     processing = false;
-  }
-
-  if (event.data.type === 'ping') {
-    window.parent.postMessage({
-      type: 'pong',
-      ready: ready,
-      frames: frameCount,
-      faces: faceCount
-    }, '*');
   }
 });
 

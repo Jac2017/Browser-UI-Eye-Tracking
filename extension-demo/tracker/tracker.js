@@ -80,9 +80,14 @@ function initFaceMesh() {
 
       if (event.data.type === 'facemesh-ready') {
         clearTimeout(timeout);
-        faceMeshReady = true;
-        console.log('[EyeD] Sandbox FaceMesh initialized successfully');
-        resolve();
+        if (!faceMeshReady) {
+          faceMeshReady = true;
+          console.log('[EyeD] Sandbox FaceMesh initialized successfully');
+          resolve();
+        }
+      } else if (event.data.type === 'facemesh-loading') {
+        // Sandbox received our ping but isn't ready yet — keep waiting
+        console.log('[EyeD] Sandbox still loading...');
       } else if (event.data.type === 'facemesh-error') {
         clearTimeout(timeout);
         console.error('[EyeD] Sandbox FaceMesh error:', event.data.error);
@@ -95,6 +100,30 @@ function initFaceMesh() {
         console.log('[EyeD] Sandbox pong:', event.data);
       }
     });
+
+    // Send init message to sandbox so it captures our window reference.
+    // Manifest-sandboxed pages can't use window.parent.postMessage —
+    // they must reply via event.source from a received message.
+    // Poll every second in case sandbox hasn't loaded yet.
+    function pingsandbox() {
+      if (faceMeshReady) return;
+      try {
+        sandboxIframe.contentWindow.postMessage({ type: 'init' }, '*');
+      } catch (e) {
+        console.warn('[EyeD] Could not ping sandbox:', e);
+      }
+      setTimeout(pingsandbox, 1000);
+    }
+
+    // Wait for iframe to load, then start pinging
+    sandboxIframe.addEventListener('load', () => {
+      console.log('[EyeD] Sandbox iframe loaded, sending init...');
+      pingsandbox();
+    });
+    // Also try immediately in case iframe already loaded
+    if (sandboxIframe.contentWindow) {
+      setTimeout(pingsandbox, 500);
+    }
   });
 }
 
