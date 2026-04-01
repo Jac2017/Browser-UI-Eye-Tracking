@@ -88,11 +88,18 @@ function initFaceMesh() {
         console.error('[EyeD] Sandbox FaceMesh error:', event.data.error);
         reject(new Error(event.data.error));
       } else if (event.data.type === 'facemesh-results') {
+        _debugStats.resultsReceived++;
+        if (event.data.landmarks) _debugStats.facesDetected++;
         onFaceMeshResults(event.data.landmarks);
+      } else if (event.data.type === 'pong') {
+        console.log('[EyeD] Sandbox pong:', event.data);
       }
     });
   });
 }
+
+// Debug stats for diagnosing frame transfer
+const _debugStats = { framesSent: 0, resultsReceived: 0, facesDetected: 0, errors: 0 };
 
 // Offscreen canvas for extracting video frame pixels
 let _frameCanvas = null;
@@ -119,7 +126,9 @@ function sendFrameToSandbox() {
       '*',
       [buffer]
     );
+    _debugStats.framesSent++;
   } catch (e) {
+    _debugStats.errors++;
     console.warn('[EyeD] sendFrameToSandbox error:', e);
   }
   return Promise.resolve();
@@ -262,6 +271,16 @@ function startProcessingLoop() {
     requestAnimationFrame(processFrame);
   }
   processFrame();
+
+  // Periodic debug: ping sandbox and log stats every 3 seconds
+  setInterval(() => {
+    console.log('[EyeD] Debug stats:', JSON.stringify(_debugStats),
+      'webcamReady:', state.webcamReady, 'faceMeshReady:', faceMeshReady,
+      'videoReadyState:', webcamEl.readyState, 'videoW:', webcamEl.videoWidth);
+    if (sandboxIframe && sandboxIframe.contentWindow) {
+      sandboxIframe.contentWindow.postMessage({ type: 'ping' }, '*');
+    }
+  }, 3000);
 }
 
 /* ========== DATASET ========== */
