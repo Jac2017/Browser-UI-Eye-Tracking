@@ -227,15 +227,29 @@ async function initWebcam() {
 
 function startProcessingLoop() {
   let processing = false;
+  let frameCount = 0;
+  let faceCount = 0;
+  let errorCount = 0;
+  let lastDiag = 0;
   async function processFrame() {
     if (state.webcamReady && faceMeshReady && !processing && webcamEl.readyState >= 2) {
       processing = true;
+      frameCount++;
       try {
         await faceMesh.send({ image: webcamEl });
+        if (state.faceDetected) faceCount++;
       } catch (e) {
-        console.warn('FaceMesh frame error:', e);
+        errorCount++;
+        if (errorCount <= 3) console.warn('FaceMesh frame error:', e);
       }
       processing = false;
+    }
+    const now = Date.now();
+    if (now - lastDiag > 3000) {
+      lastDiag = now;
+      const d = document.getElementById('eyed-diag');
+      if (d && frameCount > 0) d.textContent += `Frames: ${frameCount}, faces: ${faceCount}, errors: ${errorCount}, readyState: ${webcamEl.readyState}\n`;
+      if (d && frameCount === 0) d.textContent += `No frames sent. webcamReady=${state.webcamReady} faceMeshReady=${faceMeshReady} readyState=${webcamEl.readyState}\n`;
     }
     requestAnimationFrame(processFrame);
   }
@@ -1142,15 +1156,28 @@ async function proceedAfterConsent() {
 }
 
 async function startApp() {
+  const diag = document.createElement('div');
+  diag.id = 'eyed-diag';
+  diag.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font:11px monospace;padding:8px;z-index:99999;max-height:200px;overflow-y:auto;';
+  document.body.appendChild(diag);
+  function dlog(msg) { console.log('[EyeD]', msg); diag.textContent += msg + '\n'; diag.scrollTop = diag.scrollHeight; }
+
+  dlog('Starting app...');
+  dlog('FaceMesh class exists: ' + (typeof FaceMesh));
+  dlog('tf exists: ' + (typeof tf));
+
   setStatusText('Loading face mesh model...');
 
   try {
+    dlog('Calling initFaceMesh()...');
     await initFaceMesh();
+    dlog('FaceMesh initialized OK, faceMeshReady=' + faceMeshReady);
     setStatusText('Face mesh loaded');
   } catch (err) {
+    dlog('FaceMesh FAILED: ' + err.message);
     console.error('FaceMesh init failed:', err);
     setStatus('face', 'error');
-    setStatusText('Face mesh failed to load — check connection and reload');
+    setStatusText('Face mesh failed to load — ' + err.message);
   }
 
   bindEvents();
@@ -1161,7 +1188,10 @@ async function startApp() {
     // No saved model — expected on first run
   }
 
+  dlog('Starting webcam...');
   await initWebcam();
+  dlog('Webcam ready=' + state.webcamReady + ', faceMeshReady=' + faceMeshReady);
+  dlog('Will process frames: ' + (state.webcamReady && faceMeshReady));
 }
 
 async function init() {
