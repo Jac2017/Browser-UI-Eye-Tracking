@@ -59,6 +59,32 @@ function setStatusText(text) {
 let faceMeshReady = false;
 let sandboxIframe = null;
 let sandboxPort = null; // MessagePort for sandbox communication
+let _awaitingResult = false; // Flow control: wait for result before sending next frame
+
+function setupPortListener(port, timeout, resolve, reject) {
+  port.onmessage = (event) => {
+    const data = event.data;
+    if (!data || !data.type) return;
+
+    if (data.type === 'facemesh-ready') {
+      clearTimeout(timeout);
+      if (!faceMeshReady) {
+        faceMeshReady = true;
+        console.log('[EyeD] Sandbox FaceMesh initialized successfully');
+        resolve();
+      }
+    } else if (data.type === 'facemesh-loading') {
+      console.log('[EyeD] Sandbox still loading...');
+    } else if (data.type === 'facemesh-error') {
+      clearTimeout(timeout);
+      console.error('[EyeD] Sandbox FaceMesh error:', data.error);
+      reject(new Error(data.error));
+    } else if (data.type === 'facemesh-results') {
+      _awaitingResult = false;
+      onFaceMeshResults(data.landmarks);
+    }
+  };
+}
 
 function initFaceMesh() {
   return new Promise((resolve, reject) => {
@@ -75,40 +101,15 @@ function initFaceMesh() {
 
     console.log('[EyeD] Waiting for sandbox FaceMesh to initialize...');
 
-    // Create a MessageChannel for reliable sandbox communication.
-    // Chrome manifest-sandboxed pages have a unique origin,
-    // so event.source / window.parent may not work.
-    const channel = new MessageChannel();
-    sandboxPort = channel.port1;
-
-    // Listen for messages from sandbox via the port
-    sandboxPort.onmessage = (event) => {
-      const data = event.data;
-      if (!data || !data.type) return;
-
-      if (data.type === 'facemesh-ready') {
-        clearTimeout(timeout);
-        if (!faceMeshReady) {
-          faceMeshReady = true;
-          console.log('[EyeD] Sandbox FaceMesh initialized successfully');
-          resolve();
-        }
-      } else if (data.type === 'facemesh-loading') {
-        console.log('[EyeD] Sandbox still loading...');
-      } else if (data.type === 'facemesh-error') {
-        clearTimeout(timeout);
-        console.error('[EyeD] Sandbox FaceMesh error:', data.error);
-        reject(new Error(data.error));
-      } else if (data.type === 'facemesh-results') {
-        _debugStats.resultsReceived++;
-        if (data.landmarks) _debugStats.facesDetected++;
-        onFaceMeshResults(data.landmarks);
-      }
-    };
-
-    // Send port2 to the sandbox iframe once it loads
+    // Send a new MessageChannel to the sandbox.
+    // A MessagePort can only be transferred once, so each retry
+    // must create a fresh channel.
     function sendPort() {
+      if (faceMeshReady) return;
       try {
+        const channel = new MessageChannel();
+        sandboxPort = channel.port1;
+        setupPortListener(sandboxPort, timeout, resolve, reject);
         sandboxIframe.contentWindow.postMessage(
           { type: 'init-port' }, '*', [channel.port2]
         );
@@ -121,9 +122,9 @@ function initFaceMesh() {
     sandboxIframe.addEventListener('load', () => {
       console.log('[EyeD] Sandbox iframe loaded');
       sendPort();
-      // Ping periodically in case sandbox wasn't ready for the port
-      const pingInterval = setInterval(() => {
-        if (faceMeshReady) { clearInterval(pingInterval); return; }
+      // Retry with a fresh channel in case sandbox wasn't ready
+      const retryInterval = setInterval(() => {
+        if (faceMeshReady) { clearInterval(retryInterval); return; }
         sendPort();
       }, 2000);
     });
@@ -135,15 +136,12 @@ function initFaceMesh() {
   });
 }
 
-// Debug stats for diagnosing frame transfer
-const _debugStats = { framesSent: 0, resultsReceived: 0, facesDetected: 0, errors: 0 };
-
 // Offscreen canvas for extracting video frame pixels
 let _frameCanvas = null;
 let _frameCtx = null;
 
 function sendFrameToSandbox() {
-  if (!sandboxPort || !faceMeshReady) return Promise.resolve();
+  if (!sandboxPort || !faceMeshReady) return;
   try {
     const w = webcamEl.videoWidth || 640;
     const h = webcamEl.videoHeight || 480;
@@ -162,12 +160,10 @@ function sendFrameToSandbox() {
       { type: 'process-frame', pixels: buffer, width: w, height: h },
       [buffer]
     );
-    _debugStats.framesSent++;
+    _awaitingResult = true;
   } catch (e) {
-    _debugStats.errors++;
     console.warn('[EyeD] sendFrameToSandbox error:', e);
   }
-  return Promise.resolve();
 }
 
 function onFaceMeshResults(landmarks) {
@@ -293,30 +289,18 @@ async function initWebcam() {
 }
 
 function startProcessingLoop() {
-  let processing = false;
   async function processFrame() {
-    if (state.webcamReady && faceMeshReady && !processing && webcamEl.readyState >= 2) {
-      processing = true;
+    // Only send a new frame if we're not waiting for a result from the previous one
+    if (state.webcamReady && faceMeshReady && !_awaitingResult && webcamEl.readyState >= 2) {
       try {
-        await sendFrameToSandbox();
+        sendFrameToSandbox();
       } catch (e) {
         console.warn('FaceMesh frame error:', e);
       }
-      processing = false;
     }
     requestAnimationFrame(processFrame);
   }
   processFrame();
-
-  // Periodic debug: ping sandbox and log stats every 3 seconds
-  setInterval(() => {
-    console.log('[EyeD] Debug stats:', JSON.stringify(_debugStats),
-      'webcamReady:', state.webcamReady, 'faceMeshReady:', faceMeshReady,
-      'videoReadyState:', webcamEl.readyState, 'videoW:', webcamEl.videoWidth);
-    if (sandboxIframe && sandboxIframe.contentWindow) {
-      sandboxIframe.contentWindow.postMessage({ type: 'ping' }, '*');
-    }
-  }, 3000);
 }
 
 /* ========== DATASET ========== */
