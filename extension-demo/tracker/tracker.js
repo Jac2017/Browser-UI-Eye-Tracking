@@ -101,38 +101,23 @@ function initFaceMesh() {
 
     console.log('[EyeD] Waiting for sandbox FaceMesh to initialize...');
 
-    // Send a new MessageChannel to the sandbox.
-    // A MessagePort can only be transferred once, so each retry
-    // must create a fresh channel.
-    function sendPort() {
-      if (faceMeshReady) return;
+    // Create ONE MessageChannel. The port is sent to the sandbox
+    // exactly once, on the iframe load event (which guarantees the
+    // sandbox's message listener is registered).
+    const channel = new MessageChannel();
+    sandboxPort = channel.port1;
+    setupPortListener(sandboxPort, timeout, resolve, reject);
+
+    sandboxIframe.addEventListener('load', () => {
+      console.log('[EyeD] Sandbox iframe loaded, sending MessagePort...');
       try {
-        const channel = new MessageChannel();
-        sandboxPort = channel.port1;
-        setupPortListener(sandboxPort, timeout, resolve, reject);
         sandboxIframe.contentWindow.postMessage(
           { type: 'init-port' }, '*', [channel.port2]
         );
-        console.log('[EyeD] Sent MessagePort to sandbox');
       } catch (e) {
-        console.warn('[EyeD] Could not send port to sandbox:', e);
+        console.error('[EyeD] Failed to send port:', e);
       }
-    }
-
-    sandboxIframe.addEventListener('load', () => {
-      console.log('[EyeD] Sandbox iframe loaded');
-      sendPort();
-      // Retry with a fresh channel in case sandbox wasn't ready
-      const retryInterval = setInterval(() => {
-        if (faceMeshReady) { clearInterval(retryInterval); return; }
-        sendPort();
-      }, 2000);
     });
-
-    // Also try immediately in case iframe already loaded
-    if (sandboxIframe.contentWindow) {
-      setTimeout(sendPort, 500);
-    }
   });
 }
 

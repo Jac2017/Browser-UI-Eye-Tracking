@@ -50,9 +50,10 @@ function init() {
   }
 }
 
-// Listen for the MessagePort from parent (sent via postMessage transfer)
+// Listen for the MessagePort from parent (sent via postMessage transfer).
+// Always accept the latest port to stay in sync with the parent.
 window.addEventListener('message', (event) => {
-  if (event.ports && event.ports.length > 0 && !parentPort) {
+  if (event.ports && event.ports.length > 0) {
     parentPort = event.ports[0];
     console.log('[Sandbox] Received MessagePort from parent');
 
@@ -60,16 +61,6 @@ window.addEventListener('message', (event) => {
     parentPort.onmessage = async (portEvent) => {
       const data = portEvent.data;
       if (!data || !data.type) return;
-
-      if (data.type === 'ping') {
-        sendToParent({
-          type: ready ? 'facemesh-ready' : 'facemesh-loading',
-          ready: ready,
-          frames: frameCount,
-          faces: faceCount
-        });
-        return;
-      }
 
       if (data.type === 'process-frame' && ready && faceMesh && !processing) {
         processing = true;
