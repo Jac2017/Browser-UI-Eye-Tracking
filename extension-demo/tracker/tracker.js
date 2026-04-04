@@ -1,7 +1,7 @@
 /**
  * EyeD Tracker - Core eye tracking engine
  * Adapted from HUE Vision (Browser-UI-Eye-Tracking)
- * Uses MediaPipe FaceMesh + TensorFlow.js for webcam-based gaze prediction.
+ * Uses MediaPipe FaceLandmarker (Tasks Vision) + TensorFlow.js for webcam-based gaze prediction.
  */
 
 /* ========== STATE ========== */
@@ -55,100 +55,30 @@ function setStatusText(text) {
   $('#status-text').textContent = text;
 }
 
-/* ========== MEDIAPIPE FACE MESH (via sandbox iframe) ========== */
+/* ========== MEDIAPIPE FACE LANDMARKER (Tasks Vision API) ========== */
 let faceMeshReady = false;
-let sandboxIframe = null;
-let sandboxPort = null; // MessagePort for sandbox communication
-let _awaitingResult = false; // Flow control: wait for result before sending next frame
+let faceLandmarker = null;
 
-function setupPortListener(port, timeout, resolve, reject) {
-  port.onmessage = (event) => {
-    const data = event.data;
-    if (!data || !data.type) return;
+async function initFaceMesh() {
+  // Dynamically import the vision bundle (ES module, CSP-safe — no eval)
+  const vision = await import(chrome.runtime.getURL('lib/vision_bundle.mjs'));
 
-    if (data.type === 'facemesh-ready') {
-      clearTimeout(timeout);
-      if (!faceMeshReady) {
-        faceMeshReady = true;
-        console.log('[EyeD] Sandbox FaceMesh initialized successfully');
-        resolve();
-      }
-    } else if (data.type === 'facemesh-loading') {
-      console.log('[EyeD] Sandbox still loading...');
-    } else if (data.type === 'facemesh-error') {
-      clearTimeout(timeout);
-      console.error('[EyeD] Sandbox FaceMesh error:', data.error);
-      reject(new Error(data.error));
-    } else if (data.type === 'facemesh-results') {
-      _awaitingResult = false;
-      onFaceMeshResults(data.landmarks);
-    }
-  };
-}
+  const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+    chrome.runtime.getURL('lib/wasm/')
+  );
 
-function initFaceMesh() {
-  return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      reject(new Error('FaceMesh load timed out (30s). Sandbox may have failed.'));
-    }, FACEMESH_LOAD_TIMEOUT_MS);
-
-    sandboxIframe = document.getElementById('facemesh-sandbox');
-    if (!sandboxIframe) {
-      clearTimeout(timeout);
-      reject(new Error('Sandbox iframe not found'));
-      return;
-    }
-
-    console.log('[EyeD] Waiting for sandbox FaceMesh to initialize...');
-
-    // Create ONE MessageChannel. The port is sent to the sandbox
-    // exactly once, on the iframe load event (which guarantees the
-    // sandbox's message listener is registered).
-    const channel = new MessageChannel();
-    sandboxPort = channel.port1;
-    setupPortListener(sandboxPort, timeout, resolve, reject);
-
-    sandboxIframe.addEventListener('load', () => {
-      console.log('[EyeD] Sandbox iframe loaded, sending MessagePort...');
-      try {
-        sandboxIframe.contentWindow.postMessage(
-          { type: 'init-port' }, '*', [channel.port2]
-        );
-      } catch (e) {
-        console.error('[EyeD] Failed to send port:', e);
-      }
-    });
+  faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: chrome.runtime.getURL('lib/face_landmarker.task'),
+    },
+    runningMode: 'VIDEO',
+    numFaces: 1,
+    outputFaceBlendshapes: false,
+    outputFacialTransformationMatrixes: false,
   });
-}
 
-// Offscreen canvas for extracting video frame pixels
-let _frameCanvas = null;
-let _frameCtx = null;
-
-function sendFrameToSandbox() {
-  if (!sandboxPort || !faceMeshReady) return;
-  try {
-    const w = webcamEl.videoWidth || 640;
-    const h = webcamEl.videoHeight || 480;
-    if (!_frameCanvas) {
-      _frameCanvas = document.createElement('canvas');
-      _frameCtx = _frameCanvas.getContext('2d');
-    }
-    if (_frameCanvas.width !== w || _frameCanvas.height !== h) {
-      _frameCanvas.width = w;
-      _frameCanvas.height = h;
-    }
-    _frameCtx.drawImage(webcamEl, 0, 0, w, h);
-    const imageData = _frameCtx.getImageData(0, 0, w, h);
-    const buffer = imageData.data.buffer;
-    sandboxPort.postMessage(
-      { type: 'process-frame', pixels: buffer, width: w, height: h },
-      [buffer]
-    );
-    _awaitingResult = true;
-  } catch (e) {
-    console.warn('[EyeD] sendFrameToSandbox error:', e);
-  }
+  faceMeshReady = true;
+  console.log('[EyeD] FaceLandmarker initialized successfully');
 }
 
 function onFaceMeshResults(landmarks) {
@@ -274,14 +204,19 @@ async function initWebcam() {
 }
 
 function startProcessingLoop() {
+  let processing = false;
   async function processFrame() {
-    // Only send a new frame if we're not waiting for a result from the previous one
-    if (state.webcamReady && faceMeshReady && !_awaitingResult && webcamEl.readyState >= 2) {
+    if (state.webcamReady && faceMeshReady && faceLandmarker && !processing && webcamEl.readyState >= 2) {
+      processing = true;
       try {
-        sendFrameToSandbox();
+        const result = faceLandmarker.detectForVideo(webcamEl, performance.now());
+        const landmarks = (result.faceLandmarks && result.faceLandmarks.length > 0)
+          ? result.faceLandmarks[0] : null;
+        onFaceMeshResults(landmarks);
       } catch (e) {
-        console.warn('FaceMesh frame error:', e);
+        console.warn('FaceLandmarker frame error:', e);
       }
+      processing = false;
     }
     requestAnimationFrame(processFrame);
   }
