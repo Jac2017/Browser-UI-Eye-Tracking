@@ -1,0 +1,18 @@
+{
+  "name": "eyed-mcp-server",
+  "version": "1.0.0",
+  "description": "MCP server for EyeD eye-tracking data and analytics",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "eyed-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.7.0",
+    "zod": "^4.4.3"
+  }
+}
